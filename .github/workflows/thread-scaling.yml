@@ -1,0 +1,163 @@
+name: Thread scaling
+
+on:
+  workflow_call:
+    inputs:
+      benchmarks:
+        description: JSON array containing name, command, working_directory, workload, and workload_unit.
+        required: true
+        type: string
+      strategy:
+        description: single-sweep, thread-sharded, or replicated-sweep.
+        required: false
+        default: replicated-sweep
+        type: string
+      threads:
+        description: auto, powers-of-two, a comma-separated list, or an inclusive range.
+        required: false
+        default: auto
+        type: string
+      replicas:
+        description: Replicas for replicated-sweep; auto uses the number of tested thread counts.
+        required: false
+        default: auto
+        type: string
+      runs:
+        description: Measured runs for every thread count.
+        required: false
+        default: 5
+        type: number
+      warmup-runs:
+        description: Unmeasured warmup runs for every thread count.
+        required: false
+        default: 1
+        type: number
+      timeout-seconds:
+        description: Timeout for each command invocation.
+        required: false
+        default: 300
+        type: number
+      max-threads:
+        description: Maximum CPUs included in an automatic sweep; zero uses every visible CPU.
+        required: false
+        default: 0
+        type: number
+      runner:
+        description: GitHub-hosted or self-hosted runner label.
+        required: false
+        default: ubuntu-latest
+        type: string
+      setup-command:
+        description: Optional shell command run after checkout in every measurement job.
+        required: false
+        default: ""
+        type: string
+      thread-env:
+        description: Optional environment variable that receives the active thread count.
+        required: false
+        default: ""
+        type: string
+      minimum-efficiency:
+        description: Minimum efficiency fraction at the largest count; zero disables the check.
+        required: false
+        default: "0"
+        type: string
+      artifact-retention-days:
+        description: Retention period for partial and final artifacts.
+        required: false
+        default: 14
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Discover CPUs and create matrix
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - id: discover
+        name: Detect available CPUs
+        uses: gemc/ThreadScale@v1
+        with:
+          mode: discover
+          benchmarks: ${{ inputs.benchmarks }}
+          strategy: ${{ inputs.strategy }}
+          threads: ${{ inputs.threads }}
+          replicas: ${{ inputs.replicas }}
+          max-threads: ${{ inputs.max-threads }}
+
+  benchmark:
+    name: ${{ matrix.benchmark }} / ${{ matrix.id }}
+    needs: [ discover ]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v6
+
+      - name: Set up benchmark
+        if: ${{ inputs.setup-command != '' }}
+        env:
+          THREAD_SCALE_SETUP_COMMAND: ${{ inputs.setup-command }}
+        shell: bash
+        run: bash -eo pipefail -c "${THREAD_SCALE_SETUP_COMMAND}"
+
+      - id: benchmark
+        name: Measure thread scaling
+        uses: gemc/ThreadScale@v1
+        with:
+          benchmark-name: ${{ matrix.benchmark }}
+          command: ${{ matrix.command }}
+          working-directory: ${{ matrix.working_directory }}
+          threads: ${{ matrix.threads }}
+          replica: ${{ matrix.replica }}
+          runs: ${{ inputs.runs }}
+          warmup-runs: ${{ inputs.warmup-runs }}
+          timeout-seconds: ${{ inputs.timeout-seconds }}
+          thread-env: ${{ inputs.thread-env }}
+          workload: ${{ matrix.workload }}
+          workload-unit: ${{ matrix.workload_unit }}
+          max-threads: ${{ inputs.max-threads }}
+          output-dir: thread-scaling-part
+
+      - name: Upload partial result
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-scaling-part-${{ matrix.id }}
+          path: ${{ steps.benchmark.outputs.result-file }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  report:
+    name: Aggregate and plot
+    needs: [ benchmark ]
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Download partial results
+        uses: actions/download-artifact@v7
+        with:
+          pattern: thread-scaling-part-*
+          path: thread-scaling-parts
+
+      - id: report
+        name: Create scaling report
+        uses: gemc/ThreadScale@v1
+        with:
+          mode: report
+          input-dir: thread-scaling-parts
+          output-dir: thread-scaling
+          minimum-efficiency: ${{ inputs.minimum-efficiency }}
+
+      - name: Upload scaling report
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-scaling-report
+          path: ${{ steps.report.outputs.results-dir }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}

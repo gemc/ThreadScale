@@ -1,0 +1,108 @@
+name: ThreadScale
+description: Measure strong scaling, speedup, throughput, and parallel efficiency across application threads.
+author: GEMC Collaboration
+
+branding:
+  color: blue
+  icon: activity
+
+inputs:
+  mode:
+    description: "Operation to perform: discover, benchmark, or report."
+    required: false
+    default: benchmark
+  command:
+    description: Command template. Use {threads}, {run}, {replica}, and {benchmark} placeholders.
+    required: false
+  threads:
+    description: auto, powers-of-two, a comma-separated list, or an inclusive range such as 1-8.
+    required: false
+    default: auto
+  runs:
+    description: Measured runs for every thread count.
+    required: false
+    default: "5"
+  warmup-runs:
+    description: Unmeasured warmup runs for every thread count.
+    required: false
+    default: "1"
+  thread-env:
+    description: Optional environment variable that receives the active thread count.
+    required: false
+  timeout-seconds:
+    description: Timeout for each command invocation; zero disables the timeout.
+    required: false
+    default: "300"
+  working-directory:
+    description: Directory in which the benchmark command runs.
+    required: false
+    default: .
+  benchmark-name:
+    description: Human-readable benchmark name stored in results and used in plots.
+    required: false
+    default: benchmark
+  replica:
+    description: Replica number for distributed measurements.
+    required: false
+    default: "1"
+  workload:
+    description: Work completed per invocation; enables the rate plot when greater than zero.
+    required: false
+    default: "0"
+  workload-unit:
+    description: Workload unit used in rates, for example events or images.
+    required: false
+    default: items
+  output-dir:
+    description: Directory for a partial benchmark or final report.
+    required: false
+    default: thread-scaling
+  input-dir:
+    description: Directory recursively containing partial JSON files in report mode.
+    required: false
+    default: thread-scaling-parts
+  minimum-efficiency:
+    description: Fail report mode when efficiency at the largest count is below this fraction; zero disables.
+    required: false
+    default: "0"
+  max-threads:
+    description: Cap on detected CPUs and auto-generated thread counts; zero uses every visible CPU.
+    required: false
+    default: "0"
+  benchmarks:
+    description: JSON benchmark array used by discover mode to create a job matrix.
+    required: false
+  strategy:
+    description: single-sweep, thread-sharded, or replicated-sweep matrix strategy in discover mode.
+    required: false
+    default: single-sweep
+  replicas:
+    description: Replica jobs for replicated-sweep; auto creates one replica per tested thread count.
+    required: false
+    default: auto
+
+outputs:
+  cores:
+    description: CPUs available after affinity, cgroup, and max-threads limits.
+  thread-list:
+    description: JSON array of tested thread counts.
+  matrix:
+    description: Dynamic GitHub Actions matrix generated in discover mode.
+  job-count:
+    description: Number of matrix measurement jobs generated in discover mode.
+  runner-metadata:
+    description: JSON runner and CPU metadata.
+  result-file:
+    description: Partial JSON file written in benchmark mode.
+  results-dir:
+    description: Absolute result directory written by benchmark or report mode.
+  summary-file:
+    description: Markdown summary file written in report mode.
+  csv-file:
+    description: CSV result file written in report mode.
+  json-file:
+    description: Aggregated JSON result file written in report mode.
+
+runs:
+  using: node24
+  main: src/main.js

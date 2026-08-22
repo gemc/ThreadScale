@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Check JavaScript
+        run: npm run check
+
+      - name: Run unit tests
+        run: npm test
+
+      - id: benchmark
+        name: Exercise benchmark mode
+        uses: ./
+        with:
+          benchmark-name: timer-smoke-test
+          command: node -e "setTimeout(() => {}, 30 / {threads})"
+          threads: 1,2
+          runs: 2
+          warmup-runs: 0
+          output-dir: thread-scaling-parts
+
+      - name: Exercise report mode
+        uses: ./
+        with:
+          mode: report
+          input-dir: thread-scaling-parts
+          output-dir: thread-scaling

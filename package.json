@@ -1,0 +1,14 @@
+{
+  "name": "threadscale-action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Language-independent strong-scaling GitHub Action",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "node --check src/main.js && node --check src/report.js",
+    "test": "node --test"
+  }
+}
