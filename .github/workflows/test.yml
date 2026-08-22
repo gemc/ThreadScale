@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,20 +27,116 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-      - id: benchmark
-        name: Exercise benchmark mode
+  discover:
+    name: Discover available threads
+    needs: [ unit ]
+    runs-on: ubuntu-latest
+    outputs:
+      cores: ${{ steps.discover.outputs.cores }}
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check available CPU cores
+        shell: bash
+        run: |
+          echo "CPUs reported by nproc: $(nproc)"
+          if command -v lscpu >/dev/null 2>&1; then
+            lscpu
+          fi
+
+      - id: discover
+        name: Create one test job per available thread count
         uses: ./
         with:
-          benchmark-name: timer-smoke-test
-          command: node -e "setTimeout(() => {}, 30 / {threads})"
-          threads: 1,2
-          runs: 2
-          warmup-runs: 0
-          output-dir: thread-scaling-parts
+          mode: discover
+          strategy: thread-sharded
+          threads: auto
+          replicas: 1
+          benchmarks: >-
+            [
+              {
+                "name": "timer-smoke-test",
+                "command": "node -e \"setTimeout(() => {}, Math.max(10, 120 / {threads}))\"",
+                "working_directory": "."
+              }
+            ]
 
-      - name: Exercise report mode
+      - name: Report dynamic fan-out
+        env:
+          CORES: ${{ steps.discover.outputs.cores }}
+          JOB_COUNT: ${{ steps.discover.outputs.job-count }}
+          THREAD_LIST: ${{ steps.discover.outputs.thread-list }}
+        shell: bash
+        run: |
+          echo "ThreadScale detected ${CORES} available threads"
+          echo "Thread counts: ${THREAD_LIST}"
+          echo "Spawning ${JOB_COUNT} measurement jobs"
+          {
+            echo "## ThreadScale test fan-out"
+            echo
+            echo "Available threads: ${CORES}"
+            echo
+            echo "Measurement jobs: ${JOB_COUNT} (${THREAD_LIST})"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  benchmark:
+    name: Threads ${{ matrix.threads }}
+    needs: [ discover ]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - id: benchmark
+        name: Measure timer with ${{ matrix.threads }} threads
+        uses: ./
+        with:
+          benchmark-name: ${{ matrix.benchmark }}
+          command: ${{ matrix.command }}
+          working-directory: ${{ matrix.working_directory }}
+          threads: ${{ matrix.threads }}
+          replica: ${{ matrix.replica }}
+          runs: 3
+          warmup-runs: 0
+          output-dir: thread-scaling-part
+
+      - name: Upload partial result
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-scaling-part-${{ matrix.id }}
+          path: ${{ steps.benchmark.outputs.result-file }}
+          if-no-files-found: error
+
+  report:
+    name: Aggregate results and plot
+    needs: [ benchmark ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download partial results
+        uses: actions/download-artifact@v7
+        with:
+          pattern: thread-scaling-part-*
+          path: thread-scaling-parts
+
+      - id: report
+        name: Create final summary and plots
         uses: ./
         with:
           mode: report
           input-dir: thread-scaling-parts
           output-dir: thread-scaling
+
+      - name: Upload final report
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-scaling-report
+          path: ${{ steps.report.outputs.results-dir }}
+          if-no-files-found: error

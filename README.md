@@ -109,7 +109,8 @@ thread-scaling/
 
 The rate plot is generated when `workload` is greater than zero. All plots are dependency-free SVG files that
 remain sharp in the GitHub job summary, downloaded artifacts, and project documentation. Runtime and speedup
-plots include ideal-scaling reference lines.
+plots include ideal-scaling reference lines. The GitHub Job Summary also renders a Mermaid time-vs-threads chart
+after each benchmark table.
 
 The job summary contains a table like this:
 

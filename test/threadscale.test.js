@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 
 const { expandCommand } = require("../src/benchmark");
 const { buildMatrix, parseBenchmarks, parseThreadSpec } = require("../src/matrix");
-const { aggregate, createReport, median, statistics } = require("../src/report");
+const { aggregate, createReport, median, renderMermaidTimeChart, statistics } = require("../src/report");
 
 const BENCHMARKS = [{
   name: "demo",
@@ -106,6 +106,19 @@ test("replicated sweeps use median paired speedups", () => {
   assert.equal(benchmarks[0].points[1].paired_speedup_samples, 2);
 });
 
+test("the Markdown summary includes a time-vs-threads plot", () => {
+  const chart = renderMermaidTimeChart({
+    name: "demo",
+    points: [
+      { median: 2, threads: 1 },
+      { median: 1.2, threads: 2 },
+    ],
+  });
+  assert.match(chart, /xychart-beta/);
+  assert.match(chart, /x-axis "Threads" \[1, 2\]/);
+  assert.match(chart, /line \[2, 1.2\]/);
+});
+
 test("report mode writes portable artifacts and plots", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-test-"));
   const input = path.join(temporary, "parts");
@@ -126,7 +139,9 @@ test("report mode writes portable artifacts and plots", () => {
   }));
   const result = createReport({ inputDirectory: input, minimumEfficiency: 0, outputDirectory: output });
   assert.equal(result.failures.length, 0);
-  assert.match(fs.readFileSync(result.summaryFile, "utf8"), /Runner configurations/);
+  const summary = fs.readFileSync(result.summaryFile, "utf8");
+  assert.match(summary, /Runner configurations/);
+  assert.match(summary, /### Time vs threads/);
   for (const filename of [
     "scaling.csv",
     "scaling.json",

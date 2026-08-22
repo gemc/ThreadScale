@@ -247,6 +247,25 @@ function buildCsv(benchmarks) {
   return `${rows.map((row) => row.map(csvEscape).join(",")).join("\n")}\n`;
 }
 
+function renderMermaidTimeChart(benchmark) {
+  const title = `${benchmark.name}: time vs threads`.replace(/["\n\r]/g, "'");
+  const threads = benchmark.points.map((point) => point.threads).join(", ");
+  const times = benchmark.points.map((point) => Number(point.median.toPrecision(8))).join(", ");
+  const maximum = Math.max(...benchmark.points.map((point) => point.median), Number.EPSILON);
+  const yMaximum = Number((maximum * 1.1).toPrecision(8));
+  return [
+    "### Time vs threads",
+    "",
+    "```mermaid",
+    "xychart-beta",
+    `    title "${title}"`,
+    `    x-axis "Threads" [${threads}]`,
+    `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
+    `    line [${times}]`,
+    "```",
+  ].join("\n");
+}
+
 function buildMarkdown(benchmarks) {
   const lines = ["# Thread Scaling Results", ""];
   for (const benchmark of benchmarks) {
@@ -288,7 +307,7 @@ function buildMarkdown(benchmarks) {
       cells.push(String(point.count));
       lines.push(`| ${cells.join(" | ")} |`);
     }
-    lines.push("");
+    lines.push("", renderMermaidTimeChart(benchmark), "");
   }
   lines.push(
     "> GitHub-hosted runners are suitable for regression signals, not publication-quality benchmarking.",
@@ -374,5 +393,6 @@ module.exports = {
   mean,
   median,
   renderChart,
+  renderMermaidTimeChart,
   statistics,
 };
