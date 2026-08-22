@@ -259,32 +259,42 @@ function buildCsv(benchmarks) {
   return `${rows.map((row) => row.map(csvEscape).join(",")).join("\n")}\n`;
 }
 
-function renderMeasuredPoints(benchmark, value, unit) {
-  const labels = benchmark.points.map((point) => {
-    const threadLabel = `${point.threads} thread${point.threads === 1 ? "" : "s"}`;
-    return `🔵 \`${threadLabel}: ${numberLabel(value(point))} ${unit}\``;
-  });
-  return `**Measured points:** ${labels.join(" · ")}`;
+function mermaidPoint(value) {
+  const coordinate = Number(value.toPrecision(8));
+  return `${coordinate} "● ${numberLabel(value)}"`;
+}
+
+function mermaidChartHeader() {
+  return [
+    "---",
+    "config:",
+    "  themeCSS: |",
+    "    .line-plot-0 .labels text:first-child { text-anchor: start; }",
+    "    .line-plot-0 .labels text:last-child { text-anchor: end; }",
+    "  themeVariables:",
+    "    xyChart:",
+    '      plotColorPalette: "#0969da"',
+    "---",
+    "xychart",
+  ];
 }
 
 function renderMermaidTimeChart(benchmark) {
   const title = `${benchmark.name}: time vs threads`.replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const times = benchmark.points.map((point) => Number(point.median.toPrecision(8))).join(", ");
+  const times = benchmark.points.map((point) => mermaidPoint(point.median)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
     "### Time vs threads",
     "",
     "```mermaid",
-    "xychart-beta",
+    ...mermaidChartHeader(),
     `    title "${title}"`,
     `    x-axis "Threads" [${threads}]`,
     `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
     `    line [${times}]`,
     "```",
-    "",
-    renderMeasuredPoints(benchmark, (point) => point.median, "s"),
   ].join("\n");
 }
 
@@ -292,21 +302,19 @@ function renderMermaidRateChart(benchmark) {
   const title = `${benchmark.name}: rate vs threads`.replace(/["\n\r]/g, "'");
   const unit = String(benchmark.workload_unit).replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const rates = benchmark.points.map((point) => Number(point.median_rate.toPrecision(8))).join(", ");
+  const rates = benchmark.points.map((point) => mermaidPoint(point.median_rate)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median_rate), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
     "### Rate vs threads",
     "",
     "```mermaid",
-    "xychart-beta",
+    ...mermaidChartHeader(),
     `    title "${title}"`,
     `    x-axis "Threads" [${threads}]`,
     `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
     `    line [${rates}]`,
     "```",
-    "",
-    renderMeasuredPoints(benchmark, (point) => point.median_rate, `${unit}/s`),
   ].join("\n");
 }
 

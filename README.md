@@ -121,8 +121,9 @@ or included in project documentation. They mark every measured point with an out
 next to the marker.
 
 The GitHub Job Summary renders a Mermaid time-vs-threads chart and rate-vs-threads chart after each benchmark
-table. GitHub's Mermaid renderer does not support markers on `xychart` lines, so each summary chart is followed
-by a measured-point key containing a dot, thread count, and y-value.
+table. Mermaid 11.16 and newer place a dot and y-value label directly above every measured point on each line.
+The y-axis supplies the unit, while compact numeric labels and inward-aligned endpoint labels avoid clipping.
+This keeps the markers attached to the plot without requiring an externally hosted image.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job

@@ -129,11 +129,13 @@ test("the Markdown summary supports time and rate plots", () => {
   const timeChart = renderMermaidTimeChart(benchmark);
   const rateChart = renderMermaidRateChart(benchmark);
   assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
-  assert.match(timeChart, /line \[2, 1.2\]/);
-  assert.match(timeChart, /Measured points.*🔵 `1 thread: 2\.00 s`.*🔵 `2 threads: 1\.20 s`/);
-  assert.match(rateChart, /line \[10, 16.7\]/);
-  assert.match(rateChart, /Measured points.*🔵 `1 thread: 10\.0 events\/s`/);
-  assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart-beta/);
+  assert.match(timeChart, /line \[2 "● 2\.00", 1\.2 "● 1\.20"\]/);
+  assert.match(rateChart, /line \[10 "● 10\.0", 16\.7 "● 16\.7"\]/);
+  assert.match(rateChart, /plotColorPalette: "#0969da"/);
+  assert.match(rateChart, /text:first-child \{ text-anchor: start; \}/);
+  assert.match(rateChart, /text:last-child \{ text-anchor: end; \}/);
+  assert.doesNotMatch(timeChart, /Measured points/);
+  assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart/);
   assert.match(buildMarkdown([benchmark], "time"), /### Time vs threads/);
   assert.doesNotMatch(buildMarkdown([benchmark], "time"), /### Rate vs threads/);
   assert.match(buildMarkdown([benchmark], "rate"), /### Rate vs threads/);
