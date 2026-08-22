@@ -112,6 +112,9 @@ remain sharp in the GitHub job summary, downloaded artifacts, and project docume
 plots include ideal-scaling reference lines. The GitHub Job Summary also renders a Mermaid time-vs-threads chart
 and rate-vs-threads chart after each benchmark table.
 
+The SVG plots mark every measured point with an outlined dot and print its y-value next to the marker. The table
+immediately above each Job Summary chart provides the corresponding exact values.
+
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
 Summary, not the SVG files stored in the report artifact.

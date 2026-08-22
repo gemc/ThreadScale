@@ -152,6 +152,8 @@ function renderChart({ ideal, points, title, yLabel }) {
     "text{font-family:system-ui,-apple-system,sans-serif;fill:#24292f}",
     ".grid{stroke:#d8dee4;stroke-width:1}.axis{stroke:#57606a;stroke-width:1.5}",
     ".measured{fill:none;stroke:#0969da;stroke-width:3}",
+    ".point{fill:#0969da;stroke:#fff;stroke-width:2}",
+    ".point-label{font-size:12px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:4px}",
     ".ideal{fill:none;stroke:#8c959f;stroke-width:2;stroke-dasharray:7 6}",
     "</style>",
     `<rect width="${width}" height="${height}" fill="#fff"/>`,
@@ -194,10 +196,20 @@ function renderChart({ ideal, points, title, yLabel }) {
     lines.push(`<polyline class="ideal" points="${idealLine}"/>`);
   }
   lines.push(`<polyline class="measured" points="${measuredLine}"/>`);
-  for (const point of points) {
+  for (const [index, point] of points.entries()) {
+    const pointX = x(point.x);
+    const pointY = y(point.y);
+    const first = points.length > 1 && index === 0;
+    const last = points.length > 1 && index === points.length - 1;
+    const labelX = pointX + (first ? 9 : last ? -9 : 0);
+    const labelAnchor = first ? "start" : last ? "end" : "middle";
     lines.push(
-      `<circle cx="${x(point.x)}" cy="${y(point.y)}" r="5" fill="#0969da">`
+      `<circle class="point" cx="${pointX}" cy="${pointY}" r="6">`
         + `<title>${point.x} threads: ${numberLabel(point.y)}</title></circle>`,
+    );
+    lines.push(
+      `<text class="point-label" x="${labelX}" y="${pointY - 12}" `
+        + `text-anchor="${labelAnchor}">${numberLabel(point.y)}</text>`,
     );
   }
   lines.push("</svg>");

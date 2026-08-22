@@ -11,6 +11,7 @@ const {
   buildMarkdown,
   createReport,
   median,
+  renderChart,
   renderMermaidRateChart,
   renderMermaidTimeChart,
   statistics,
@@ -137,6 +138,17 @@ test("the Markdown summary supports time and rate plots", () => {
   assert.doesNotMatch(buildMarkdown([benchmark], "rate"), /### Time vs threads/);
   assert.match(buildMarkdown([benchmark], "both"), /### Time vs threads[\s\S]*### Rate vs threads/);
   assert.throws(() => buildMarkdown([benchmark], "invalid"), /summary-plots/);
+});
+
+test("SVG charts emphasize and label measured points", () => {
+  const chart = renderChart({
+    points: [{ x: 1, y: 2 }, { x: 2, y: 1.2 }],
+    title: "demo",
+    yLabel: "Median time (seconds)",
+  });
+  assert.equal((chart.match(/<circle class="point"/g) || []).length, 2);
+  assert.match(chart, /<text class="point-label"[^>]*>2\.00<\/text>/);
+  assert.match(chart, /<text class="point-label"[^>]*>1\.20<\/text>/);
 });
 
 test("report mode writes portable artifacts and plots", () => {
