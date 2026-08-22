@@ -259,6 +259,14 @@ function buildCsv(benchmarks) {
   return `${rows.map((row) => row.map(csvEscape).join(",")).join("\n")}\n`;
 }
 
+function renderMeasuredPoints(benchmark, value, unit) {
+  const labels = benchmark.points.map((point) => {
+    const threadLabel = `${point.threads} thread${point.threads === 1 ? "" : "s"}`;
+    return `🔵 \`${threadLabel}: ${numberLabel(value(point))} ${unit}\``;
+  });
+  return `**Measured points:** ${labels.join(" · ")}`;
+}
+
 function renderMermaidTimeChart(benchmark) {
   const title = `${benchmark.name}: time vs threads`.replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
@@ -275,6 +283,8 @@ function renderMermaidTimeChart(benchmark) {
     `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
     `    line [${times}]`,
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median, "s"),
   ].join("\n");
 }
 
@@ -295,6 +305,8 @@ function renderMermaidRateChart(benchmark) {
     `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
     `    line [${rates}]`,
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median_rate, `${unit}/s`),
   ].join("\n");
 }
 

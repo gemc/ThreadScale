@@ -107,13 +107,22 @@ thread-scaling/
     └── time-vs-threads.svg
 ```
 
-The rate plot is generated when `workload` is greater than zero. All plots are dependency-free SVG files that
-remain sharp in the GitHub job summary, downloaded artifacts, and project documentation. Runtime and speedup
-plots include ideal-scaling reference lines. The GitHub Job Summary also renders a Mermaid time-vs-threads chart
-and rate-vs-threads chart after each benchmark table.
+The report artifact contains these dependency-free SVG plots for each benchmark:
 
-The SVG plots mark every measured point with an outlined dot and print its y-value next to the marker. The table
-immediately above each Job Summary chart provides the corresponding exact values.
+| Plot | Measured value | Reference line |
+|---|---|---|
+| `time-vs-threads.svg` | Median wall-clock time at each thread count | Ideal runtime, `T(1) / N` |
+| `rate-vs-threads.svg` | `workload / median time` | None |
+| `speedup-vs-threads.svg` | `T(1) / T(N)`, or paired speedup for replicated sweeps | Ideal speedup, `N` |
+| `efficiency-vs-threads.svg` | `speedup / N × 100%` | Ideal efficiency, `100%` |
+
+The rate plot is generated only when `workload` is greater than zero. All SVG plots remain sharp when downloaded
+or included in project documentation. They mark every measured point with an outlined dot and print its y-value
+next to the marker.
+
+The GitHub Job Summary renders a Mermaid time-vs-threads chart and rate-vs-threads chart after each benchmark
+table. GitHub's Mermaid renderer does not support markers on `xychart` lines, so each summary chart is followed
+by a measured-point key containing a dot, thread count, and y-value.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job

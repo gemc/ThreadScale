@@ -130,7 +130,9 @@ test("the Markdown summary supports time and rate plots", () => {
   const rateChart = renderMermaidRateChart(benchmark);
   assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
   assert.match(timeChart, /line \[2, 1.2\]/);
+  assert.match(timeChart, /Measured points.*🔵 `1 thread: 2\.00 s`.*🔵 `2 threads: 1\.20 s`/);
   assert.match(rateChart, /line \[10, 16.7\]/);
+  assert.match(rateChart, /Measured points.*🔵 `1 thread: 10\.0 events\/s`/);
   assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart-beta/);
   assert.match(buildMarkdown([benchmark], "time"), /### Time vs threads/);
   assert.doesNotMatch(buildMarkdown([benchmark], "time"), /### Rate vs threads/);
