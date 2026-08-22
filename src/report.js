@@ -266,7 +266,36 @@ function renderMermaidTimeChart(benchmark) {
   ].join("\n");
 }
 
-function buildMarkdown(benchmarks) {
+function renderMermaidRateChart(benchmark) {
+  const title = `${benchmark.name}: rate vs threads`.replace(/["\n\r]/g, "'");
+  const unit = String(benchmark.workload_unit).replace(/["\n\r]/g, "'");
+  const threads = benchmark.points.map((point) => point.threads).join(", ");
+  const rates = benchmark.points.map((point) => Number(point.median_rate.toPrecision(8))).join(", ");
+  const maximum = Math.max(...benchmark.points.map((point) => point.median_rate), Number.EPSILON);
+  const yMaximum = Number((maximum * 1.1).toPrecision(8));
+  return [
+    "### Rate vs threads",
+    "",
+    "```mermaid",
+    "xychart-beta",
+    `    title "${title}"`,
+    `    x-axis "Threads" [${threads}]`,
+    `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
+    `    line [${rates}]`,
+    "```",
+  ].join("\n");
+}
+
+function validateSummaryPlots(value) {
+  const selection = String(value || "both").toLowerCase();
+  if (!["none", "time", "rate", "both"].includes(selection)) {
+    throw new Error(`summary-plots must be none, time, rate, or both; received ${value}`);
+  }
+  return selection;
+}
+
+function buildMarkdown(benchmarks, summaryPlots = "both") {
+  const plotSelection = validateSummaryPlots(summaryPlots);
   const lines = ["# Thread Scaling Results", ""];
   for (const benchmark of benchmarks) {
     lines.push(`## ${benchmark.name}`, "");
@@ -307,7 +336,17 @@ function buildMarkdown(benchmarks) {
       cells.push(String(point.count));
       lines.push(`| ${cells.join(" | ")} |`);
     }
-    lines.push("", renderMermaidTimeChart(benchmark), "");
+    lines.push("");
+    if (plotSelection === "time" || plotSelection === "both") {
+      lines.push(renderMermaidTimeChart(benchmark), "");
+    }
+    if (plotSelection === "rate" || plotSelection === "both") {
+      if (benchmark.workload > 0) {
+        lines.push(renderMermaidRateChart(benchmark), "");
+      } else {
+        lines.push("### Rate vs threads", "", "_Set `workload` above zero to display a rate plot._", "");
+      }
+    }
   }
   lines.push(
     "> GitHub-hosted runners are suitable for regression signals, not publication-quality benchmarking.",
@@ -349,7 +388,7 @@ function writeCharts(benchmark, outputDirectory) {
   }
 }
 
-function createReport({ inputDirectory, minimumEfficiency, outputDirectory }) {
+function createReport({ inputDirectory, minimumEfficiency, outputDirectory, summaryPlots = "both" }) {
   const partials = loadPartials(inputDirectory);
   const benchmarks = aggregate(partials);
   ensureDirectory(outputDirectory);
@@ -368,7 +407,7 @@ function createReport({ inputDirectory, minimumEfficiency, outputDirectory }) {
   const summaryFile = path.join(outputDirectory, "summary.md");
   fs.writeFileSync(jsonFile, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   fs.writeFileSync(csvFile, buildCsv(benchmarks), "utf8");
-  fs.writeFileSync(summaryFile, `${buildMarkdown(benchmarks)}\n`, "utf8");
+  fs.writeFileSync(summaryFile, `${buildMarkdown(benchmarks, summaryPlots)}\n`, "utf8");
 
   const failures = [];
   if (minimumEfficiency > 0) {
@@ -393,6 +432,8 @@ module.exports = {
   mean,
   median,
   renderChart,
+  renderMermaidRateChart,
   renderMermaidTimeChart,
   statistics,
+  validateSummaryPlots,
 };

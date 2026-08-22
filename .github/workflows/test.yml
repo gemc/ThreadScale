@@ -59,7 +59,9 @@ jobs:
               {
                 "name": "timer-smoke-test",
                 "command": "node -e \"setTimeout(() => {}, Math.max(10, 120 / {threads}))\"",
-                "working_directory": "."
+                "working_directory": ".",
+                "workload": 120,
+                "workload_unit": "units"
               }
             ]
 
@@ -103,6 +105,8 @@ jobs:
           replica: ${{ matrix.replica }}
           runs: 3
           warmup-runs: 0
+          workload: ${{ matrix.workload }}
+          workload-unit: ${{ matrix.workload_unit }}
           output-dir: thread-scaling-part
 
       - name: Upload partial result
@@ -133,6 +137,7 @@ jobs:
           mode: report
           input-dir: thread-scaling-parts
           output-dir: thread-scaling
+          summary-plots: both
 
       - name: Upload final report
         uses: actions/upload-artifact@v7

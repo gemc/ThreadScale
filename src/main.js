@@ -83,6 +83,7 @@ function report() {
     inputDirectory: getInput("input-dir", "thread-scaling-parts"),
     minimumEfficiency: getNumberInput("minimum-efficiency", 0),
     outputDirectory,
+    summaryPlots: getInput("summary-plots", "both"),
   });
   setOutput("results-dir", path.resolve(outputDirectory));
   setOutput("summary-file", path.resolve(result.summaryFile));

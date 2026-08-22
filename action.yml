@@ -53,6 +53,10 @@ inputs:
     description: Workload unit used in rates, for example events or images.
     required: false
     default: items
+  summary-plots:
+    description: Charts rendered in the Job Summary; choose none, time, rate, or both.
+    required: false
+    default: both
   output-dir:
     description: Directory for a partial benchmark or final report.
     required: false

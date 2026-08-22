@@ -57,6 +57,11 @@ on:
         required: false
         default: ""
         type: string
+      summary-plots:
+        description: Charts rendered in the Job Summary; choose none, time, rate, or both.
+        required: false
+        default: both
+        type: string
       minimum-efficiency:
         description: Minimum efficiency fraction at the largest count; zero disables the check.
         required: false
@@ -152,6 +157,7 @@ jobs:
           mode: report
           input-dir: thread-scaling-parts
           output-dir: thread-scaling
+          summary-plots: ${{ inputs.summary-plots }}
           minimum-efficiency: ${{ inputs.minimum-efficiency }}
 
       - name: Upload scaling report

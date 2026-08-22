@@ -6,7 +6,15 @@ const assert = require("node:assert/strict");
 
 const { expandCommand } = require("../src/benchmark");
 const { buildMatrix, parseBenchmarks, parseThreadSpec } = require("../src/matrix");
-const { aggregate, createReport, median, renderMermaidTimeChart, statistics } = require("../src/report");
+const {
+  aggregate,
+  buildMarkdown,
+  createReport,
+  median,
+  renderMermaidRateChart,
+  renderMermaidTimeChart,
+  statistics,
+} = require("../src/report");
 
 const BENCHMARKS = [{
   name: "demo",
@@ -106,17 +114,29 @@ test("replicated sweeps use median paired speedups", () => {
   assert.equal(benchmarks[0].points[1].paired_speedup_samples, 2);
 });
 
-test("the Markdown summary includes a time-vs-threads plot", () => {
-  const chart = renderMermaidTimeChart({
+test("the Markdown summary supports time and rate plots", () => {
+  const benchmark = {
     name: "demo",
+    workload: 20,
+    workload_unit: "events",
+    runners: [{ visible_cpus: 2 }],
     points: [
-      { median: 2, threads: 1 },
-      { median: 1.2, threads: 2 },
+      { count: 1, efficiency_percent: 100, median: 2, median_rate: 10, speedup: 1, threads: 1 },
+      { count: 1, efficiency_percent: 83.3, median: 1.2, median_rate: 16.7, speedup: 1.67, threads: 2 },
     ],
-  });
-  assert.match(chart, /xychart-beta/);
-  assert.match(chart, /x-axis "Threads" \[1, 2\]/);
-  assert.match(chart, /line \[2, 1.2\]/);
+  };
+  const timeChart = renderMermaidTimeChart(benchmark);
+  const rateChart = renderMermaidRateChart(benchmark);
+  assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
+  assert.match(timeChart, /line \[2, 1.2\]/);
+  assert.match(rateChart, /line \[10, 16.7\]/);
+  assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart-beta/);
+  assert.match(buildMarkdown([benchmark], "time"), /### Time vs threads/);
+  assert.doesNotMatch(buildMarkdown([benchmark], "time"), /### Rate vs threads/);
+  assert.match(buildMarkdown([benchmark], "rate"), /### Rate vs threads/);
+  assert.doesNotMatch(buildMarkdown([benchmark], "rate"), /### Time vs threads/);
+  assert.match(buildMarkdown([benchmark], "both"), /### Time vs threads[\s\S]*### Rate vs threads/);
+  assert.throws(() => buildMarkdown([benchmark], "invalid"), /summary-plots/);
 });
 
 test("report mode writes portable artifacts and plots", () => {
@@ -142,6 +162,7 @@ test("report mode writes portable artifacts and plots", () => {
   const summary = fs.readFileSync(result.summaryFile, "utf8");
   assert.match(summary, /Runner configurations/);
   assert.match(summary, /### Time vs threads/);
+  assert.match(summary, /### Rate vs threads/);
   for (const filename of [
     "scaling.csv",
     "scaling.json",

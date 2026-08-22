@@ -110,7 +110,11 @@ thread-scaling/
 The rate plot is generated when `workload` is greater than zero. All plots are dependency-free SVG files that
 remain sharp in the GitHub job summary, downloaded artifacts, and project documentation. Runtime and speedup
 plots include ideal-scaling reference lines. The GitHub Job Summary also renders a Mermaid time-vs-threads chart
-after each benchmark table.
+and rate-vs-threads chart after each benchmark table.
+
+Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
+`workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
+Summary, not the SVG files stored in the report artifact.
 
 The job summary contains a table like this:
 
