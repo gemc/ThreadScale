@@ -23,7 +23,8 @@ It works with command-line thread arguments and environment variables such as `O
 ```
 
 `threads: auto` measures every visible count from `1` through `N`. To reduce the number of points, use
-`threads: powers-of-two`; the largest visible count is always included. Explicit lists and ranges are supported:
+`threads: powers-of-two`; the largest visible count is always included. Explicit lists and ranges preserve the
+order in which their thread counts are written:
 
 ```yaml
 threads: 1,2,4,8
@@ -58,7 +59,8 @@ includes a reusable workflow for discovery, dynamic fan-out, artifact transfer, 
 `replicated-sweep` is the recommended statistical mode. Each replica measures every count on one VM, avoiding a
 comparison in which every point necessarily comes from a different hosted runner. With `replicas: auto`, the
 workflow creates one replica per tested thread count. Reported speedup is the median of the within-replica
-speedups; sharded measurements fall back to the ratio of aggregated median times.
+speedups; sharded measurements fall back to the ratio of aggregated median times. Replicated jobs rotate the
+thread-count order by replica, preventing every high-thread measurement from systematically running last.
 
 ```yaml
 name: Scaling
@@ -104,7 +106,11 @@ thread-scaling/
     ├── efficiency-vs-threads.svg
     ├── rate-vs-threads.svg
     ├── speedup-vs-threads.svg
-    └── time-vs-threads.svg
+    ├── time-vs-threads.svg
+    └── replicas/replica-N/
+        ├── rate-vs-threads.svg
+        ├── speedup-vs-threads.svg
+        └── time-vs-threads.svg
 ```
 
 The report artifact contains these dependency-free SVG plots for each benchmark:
@@ -146,6 +152,10 @@ S(N) = T(1) / T(N)
 E(N) = S(N) / N × 100%
 ```
 
+The aggregate table includes runtime standard deviation. An expandable per-replica table and the SVG files
+under `replicas/` preserve each runner's curve so heterogeneous hosted machines are not hidden by pooled
+medians.
+
 Set `minimum-efficiency` to a fraction such as `0.60` to fail report mode when efficiency at the largest tested
 thread count falls below the threshold.
 
@@ -155,6 +165,7 @@ ThreadScale uses Node's affinity-aware available-parallelism value, `nproc` when
 quotas. It takes the most restrictive detected value and applies `max-threads` last. Reports retain:
 
 - visible and logical CPU counts;
+- OS-reported physical cores, sockets, cores per socket, threads per core, and NUMA nodes;
 - CPU model, architecture, operating system, and runner labels;
 - Linux process affinity from `taskset`, when available;
 - `lscpu` output, when available;

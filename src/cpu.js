@@ -8,11 +8,34 @@ function positiveInteger(value) {
 }
 
 function commandOutput(command, args = []) {
-  const result = spawnSync(command, args, { encoding: "utf8", timeout: 5000 });
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+    timeout: 5000,
+  });
   if (result.status !== 0) {
     return "";
   }
   return result.stdout.trim();
+}
+
+function parseLscpu(output) {
+  const fields = new Map();
+  for (const line of String(output || "").split(/\r?\n/)) {
+    const match = line.match(/^([^:]+):\s*(.*?)\s*$/);
+    if (match) {
+      fields.set(match[1].trim(), match[2]);
+    }
+  }
+  const sockets = positiveInteger(fields.get("Socket(s)"));
+  const coresPerSocket = positiveInteger(fields.get("Core(s) per socket"));
+  return {
+    cores_per_socket: coresPerSocket || null,
+    numa_nodes: positiveInteger(fields.get("NUMA node(s)")) || null,
+    physical_cores: sockets && coresPerSocket ? sockets * coresPerSocket : null,
+    sockets: sockets || null,
+    threads_per_core: positiveInteger(fields.get("Thread(s) per core")) || null,
+  };
 }
 
 function cgroupCpuLimit() {
@@ -51,6 +74,8 @@ function detectCpuInfo(maxThreads = 0) {
     visibleCpus = Math.min(visibleCpus, maxThreads);
   }
 
+  const lscpu = commandOutput("lscpu");
+  const topology = parseLscpu(lscpu);
   return {
     visible_cpus: visibleCpus,
     logical_cpus: os.cpus().length,
@@ -63,8 +88,9 @@ function detectCpuInfo(maxThreads = 0) {
     runner_arch: process.env.RUNNER_ARCH || "",
     cpu_model: os.cpus()[0]?.model || "",
     affinity: commandOutput("taskset", ["-pc", String(process.pid)]),
-    lscpu: commandOutput("lscpu"),
+    lscpu,
+    ...topology,
   };
 }
 
-module.exports = { cgroupCpuLimit, detectCpuInfo };
+module.exports = { cgroupCpuLimit, detectCpuInfo, parseLscpu };

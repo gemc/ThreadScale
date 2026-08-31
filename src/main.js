@@ -26,6 +26,22 @@ function cpuSummary(cpu) {
   if (cpu.affinity) {
     lines.push(`- Affinity: ${cpu.affinity}`);
   }
+  const topology = [];
+  if (cpu.physical_cores) {
+    topology.push(`${cpu.physical_cores} physical cores`);
+  }
+  if (cpu.threads_per_core) {
+    topology.push(`${cpu.threads_per_core} threads per core`);
+  }
+  if (cpu.sockets) {
+    topology.push(`${cpu.sockets} socket${cpu.sockets === 1 ? "" : "s"}`);
+  }
+  if (topology.length > 0) {
+    lines.push(`- OS-reported topology: ${topology.join(", ")}`);
+  }
+  if (cpu.cgroup_cpu_limit) {
+    lines.push(`- Cgroup CPU limit: ${cpu.cgroup_cpu_limit}`);
+  }
   lines.push("");
   return lines.join("\n");
 }

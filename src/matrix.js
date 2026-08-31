@@ -2,8 +2,8 @@ const { slugify } = require("./utils");
 
 const STRATEGIES = new Set(["single-sweep", "thread-sharded", "replicated-sweep"]);
 
-function uniqueSorted(values) {
-  return [...new Set(values)].sort((left, right) => left - right);
+function uniqueInOrder(values) {
+  return [...new Set(values)];
 }
 
 function parseThreadSpec(specification, visibleCpus) {
@@ -42,12 +42,13 @@ function parseThreadSpec(specification, visibleCpus) {
     }
     threads.push(value);
   }
-  const parsed = uniqueSorted(threads);
+  const parsed = uniqueInOrder(threads);
   if (parsed.length === 0) {
     throw new Error("at least one thread count is required");
   }
-  if (parsed.at(-1) > visibleCpus) {
-    throw new Error(`thread count ${parsed.at(-1)} exceeds the ${visibleCpus} CPUs visible to the job`);
+  const maximum = Math.max(...parsed);
+  if (maximum > visibleCpus) {
+    throw new Error(`thread count ${maximum} exceeds the ${visibleCpus} CPUs visible to the job`);
   }
   return parsed;
 }
@@ -106,11 +107,13 @@ function buildMatrix({ benchmarks, threads, strategy, replicas }) {
 
     const count = strategy === "replicated-sweep" ? replicas : 1;
     for (let replica = 1; replica <= count; replica += 1) {
+      const offset = strategy === "replicated-sweep" ? (replica - 1) % threads.length : 0;
+      const orderedThreads = [...threads.slice(offset), ...threads.slice(0, offset)];
       include.push({
         ...base,
         id: `${slugify(benchmark.name)}-r${replica}`,
         replica,
-        threads: threads.join(","),
+        threads: orderedThreads.join(","),
       });
     }
   }

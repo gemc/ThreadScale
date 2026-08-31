@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { expandCommand } = require("../src/benchmark");
+const { parseLscpu } = require("../src/cpu");
 const { buildMatrix, parseBenchmarks, parseThreadSpec } = require("../src/matrix");
 const {
   aggregate,
@@ -29,7 +30,9 @@ test("auto and power-of-two thread specifications respect the visible CPU count"
   assert.deepEqual(parseThreadSpec("auto", 4), [1, 2, 3, 4]);
   assert.deepEqual(parseThreadSpec("powers-of-two", 6), [1, 2, 4, 6]);
   assert.deepEqual(parseThreadSpec("1, 3-5, 3", 8), [1, 3, 4, 5]);
+  assert.deepEqual(parseThreadSpec("2,3,4,1", 4), [2, 3, 4, 1]);
   assert.throws(() => parseThreadSpec("1,9", 8), /exceeds/);
+  assert.throws(() => parseThreadSpec("9,1", 8), /exceeds/);
 });
 
 test("all three matrix strategies have stable shapes", () => {
@@ -55,6 +58,27 @@ test("all three matrix strategies have stable shapes", () => {
   assert.equal(single.include[0].threads, "1,2");
   assert.deepEqual(sharded.include.map((item) => item.threads), ["1", "2"]);
   assert.deepEqual(replicated.include.map((item) => item.replica), [1, 2]);
+  assert.deepEqual(replicated.include.map((item) => item.threads), ["1,2", "2,1"]);
+  assert.deepEqual(
+    replicated.include.map((item) => parseThreadSpec(item.threads, 2)),
+    [[1, 2], [2, 1]],
+  );
+});
+
+test("Linux CPU topology is parsed for prominent runner reporting", () => {
+  assert.deepEqual(parseLscpu(`
+CPU(s):                   4
+Thread(s) per core:       2
+Core(s) per socket:       2
+Socket(s):                1
+NUMA node(s):             1
+`), {
+    cores_per_socket: 2,
+    numa_nodes: 1,
+    physical_cores: 2,
+    sockets: 1,
+    threads_per_core: 2,
+  });
 });
 
 test("benchmark JSON and command placeholders are validated and expanded", () => {
@@ -93,6 +117,7 @@ test("statistics and scaling aggregation use the median one-thread baseline", ()
   assert.equal(benchmarks[0].points[1].speedup, 2);
   assert.equal(benchmarks[0].points[1].efficiency_percent, 100);
   assert.equal(benchmarks[0].points[1].median_rate, 20);
+  assert.equal(benchmarks[0].replicas[0].points[1].speedup, 2);
 });
 
 test("replicated sweeps use median paired speedups", () => {
@@ -120,10 +145,34 @@ test("the Markdown summary supports time and rate plots", () => {
     name: "demo",
     workload: 20,
     workload_unit: "events",
-    runners: [{ visible_cpus: 2 }],
+    replicas: [{
+      points: [
+        { median: 2, median_rate: 10, speedup: 1, threads: 1 },
+        { median: 1.2, median_rate: 16.7, speedup: 1.67, threads: 2 },
+      ],
+      replica: 1,
+      runner: { physical_cores: 1, threads_per_core: 2, visible_cpus: 2 },
+    }],
+    runners: [{ physical_cores: 1, threads_per_core: 2, visible_cpus: 2 }],
     points: [
-      { count: 1, efficiency_percent: 100, median: 2, median_rate: 10, speedup: 1, threads: 1 },
-      { count: 1, efficiency_percent: 83.3, median: 1.2, median_rate: 16.7, speedup: 1.67, threads: 2 },
+      {
+        count: 1,
+        efficiency_percent: 100,
+        median: 2,
+        median_rate: 10,
+        speedup: 1,
+        standard_deviation: 0,
+        threads: 1,
+      },
+      {
+        count: 1,
+        efficiency_percent: 83.3,
+        median: 1.2,
+        median_rate: 16.7,
+        speedup: 1.67,
+        standard_deviation: 0,
+        threads: 2,
+      },
     ],
   };
   const timeChart = renderMermaidTimeChart(benchmark);
@@ -141,6 +190,9 @@ test("the Markdown summary supports time and rate plots", () => {
   assert.match(buildMarkdown([benchmark], "rate"), /### Rate vs threads/);
   assert.doesNotMatch(buildMarkdown([benchmark], "rate"), /### Time vs threads/);
   assert.match(buildMarkdown([benchmark], "both"), /### Time vs threads[\s\S]*### Rate vs threads/);
+  assert.match(buildMarkdown([benchmark], "both"), /Std\. dev\./);
+  assert.match(buildMarkdown([benchmark], "both"), /Per-replica sweeps \(1\)/);
+  assert.match(buildMarkdown([benchmark], "both"), /1 OS physical cores, 2 threads\/core/);
   assert.throws(() => buildMarkdown([benchmark], "invalid"), /summary-plots/);
 });
 
@@ -169,12 +221,28 @@ test("report mode writes portable artifacts and plots", () => {
       { run: 1, seconds: 2, threads: 1 },
       { run: 1, seconds: 1.2, threads: 2 },
     ],
-    runner: { visible_cpus: 2 },
+    replica: 1,
+    runner: { physical_cores: 1, threads_per_core: 2, visible_cpus: 2 },
+    workload: 20,
+    workload_unit: "events",
+  }));
+  fs.writeFileSync(path.join(input, "partial-2.json"), JSON.stringify({
+    schema_version: 1,
+    kind: "thread-scale-partial",
+    benchmark: "demo",
+    command: "demo {threads}",
+    measurements: [
+      { run: 1, seconds: 3, threads: 1 },
+      { run: 1, seconds: 2, threads: 2 },
+    ],
+    replica: 2,
+    runner: { physical_cores: 2, threads_per_core: 1, visible_cpus: 2 },
     workload: 20,
     workload_unit: "events",
   }));
   const result = createReport({ inputDirectory: input, minimumEfficiency: 0, outputDirectory: output });
   assert.equal(result.failures.length, 0);
+  assert.deepEqual(result.report.benchmarks[0].replicas.map((replica) => replica.replica), [1, 2]);
   const summary = fs.readFileSync(result.summaryFile, "utf8");
   assert.match(summary, /Runner configurations/);
   assert.match(summary, /### Time vs threads/);
@@ -187,6 +255,12 @@ test("report mode writes portable artifacts and plots", () => {
     "demo/speedup-vs-threads.svg",
     "demo/efficiency-vs-threads.svg",
     "demo/rate-vs-threads.svg",
+    "demo/replicas/replica-1/time-vs-threads.svg",
+    "demo/replicas/replica-1/speedup-vs-threads.svg",
+    "demo/replicas/replica-1/rate-vs-threads.svg",
+    "demo/replicas/replica-2/time-vs-threads.svg",
+    "demo/replicas/replica-2/speedup-vs-threads.svg",
+    "demo/replicas/replica-2/rate-vs-threads.svg",
   ]) {
     assert.equal(fs.existsSync(path.join(output, filename)), true, filename);
   }

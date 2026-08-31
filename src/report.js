@@ -25,6 +25,35 @@ function statistics(values) {
   };
 }
 
+function summarizeReplica(partial, workload) {
+  const measurements = new Map();
+  for (const measurement of partial.measurements) {
+    const thread = Number(measurement.threads);
+    if (!measurements.has(thread)) {
+      measurements.set(thread, []);
+    }
+    measurements.get(thread).push(Number(measurement.seconds));
+  }
+  const points = [...measurements]
+    .sort(([left], [right]) => left - right)
+    .map(([threads, values]) => ({ threads, ...statistics(values) }));
+  const baseline = points.find((point) => point.threads === 1);
+  for (const point of points) {
+    if (baseline) {
+      point.speedup = baseline.median / point.median;
+      point.efficiency_percent = (100 * point.speedup) / point.threads;
+    }
+    if (workload > 0) {
+      point.median_rate = workload / point.median;
+    }
+  }
+  return {
+    points,
+    replica: Number(partial.replica || 1),
+    runner: partial.runner || {},
+  };
+}
+
 function loadPartials(inputDirectory) {
   const partials = [];
   for (const filename of walkJsonFiles(inputDirectory)) {
@@ -105,12 +134,40 @@ function aggregate(partials) {
       name,
       command: benchmark.command,
       points,
+      replicas: benchmark.partials
+        .map((partial) => summarizeReplica(partial, benchmark.workload))
+        .sort((left, right) => left.replica - right.replica),
       runners: benchmark.runners,
       workload: benchmark.workload,
       workload_unit: benchmark.workload_unit,
     });
   }
   return benchmarks.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function topologyDescription(runner) {
+  const parts = [];
+  if (runner.physical_cores) {
+    parts.push(`${runner.physical_cores} OS physical cores`);
+  }
+  if (runner.threads_per_core) {
+    parts.push(`${runner.threads_per_core} threads/core`);
+  }
+  if (runner.sockets) {
+    parts.push(`${runner.sockets} socket${runner.sockets === 1 ? "" : "s"}`);
+  }
+  return parts.join(", ");
+}
+
+function runnerDescription(runner) {
+  return [
+    runner.cpu_model || "unknown CPU",
+    topologyDescription(runner),
+    `${runner.platform || "unknown OS"} ${runner.release || ""}`.trim(),
+    runner.architecture || "unknown architecture",
+    `${runner.visible_cpus} visible CPUs`,
+    runner.affinity || "affinity unavailable",
+  ].filter(Boolean).join("; ");
 }
 
 function xmlEscape(value) {
@@ -333,13 +390,7 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
     lines.push(`## ${benchmark.name}`, "");
     const runners = new Map();
     for (const runner of benchmark.runners) {
-      const description = [
-        runner.cpu_model || "unknown CPU",
-        `${runner.platform || "unknown OS"} ${runner.release || ""}`.trim(),
-        runner.architecture || "unknown architecture",
-        `${runner.visible_cpus} visible CPUs`,
-        runner.affinity || "affinity unavailable",
-      ].join("; ");
+      const description = runnerDescription(runner);
       runners.set(description, (runners.get(description) || 0) + 1);
     }
     lines.push("Runner configurations:", "");
@@ -349,16 +400,20 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
     lines.push("");
     if (benchmark.workload > 0) {
       lines.push(
-        "| Threads | Median time | Speedup | Efficiency | Median rate | Samples |",
-        "|---:|---:|---:|---:|---:|---:|",
+        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Median rate | Samples |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
       );
     } else {
-      lines.push("| Threads | Median time | Speedup | Efficiency | Samples |", "|---:|---:|---:|---:|---:|");
+      lines.push(
+        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Samples |",
+        "|---:|---:|---:|---:|---:|---:|",
+      );
     }
     for (const point of benchmark.points) {
       const cells = [
         String(point.threads),
         `${point.median.toFixed(3)} s`,
+        `${point.standard_deviation.toFixed(3)} s`,
         `${point.speedup.toFixed(2)}x`,
         `${point.efficiency_percent.toFixed(1)}%`,
       ];
@@ -369,6 +424,30 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
       lines.push(`| ${cells.join(" | ")} |`);
     }
     lines.push("");
+    const replicaSweeps = benchmark.replicas.filter((replica) =>
+      replica.points.length > 1 && replica.points.some((point) => point.threads === 1));
+    if (replicaSweeps.length > 0) {
+      lines.push(
+        "<details>",
+        `<summary>Per-replica sweeps (${replicaSweeps.length})</summary>`,
+        "",
+        "| Replica | Runner | Threads | Median time | Speedup | Median rate |",
+        "|---:|:---|---:|---:|---:|---:|",
+      );
+      for (const replica of replicaSweeps) {
+        for (const [index, point] of replica.points.entries()) {
+          const rate = benchmark.workload > 0
+            ? `${point.median_rate.toFixed(2)} ${benchmark.workload_unit}/s`
+            : "—";
+          lines.push(
+            `| ${index === 0 ? replica.replica : ""} | `
+              + `${index === 0 ? runnerDescription(replica.runner) : ""} | ${point.threads} | `
+              + `${point.median.toFixed(3)} s | ${point.speedup.toFixed(2)}x | ${rate} |`,
+          );
+        }
+      }
+      lines.push("", "</details>", "");
+    }
     if (plotSelection === "time" || plotSelection === "both") {
       lines.push(renderMermaidTimeChart(benchmark), "");
     }
@@ -417,6 +496,34 @@ function writeCharts(benchmark, outputDirectory) {
       title: `${benchmark.name}: throughput scaling`,
       yLabel: `${benchmark.workload_unit} / second`,
     }));
+  }
+  for (const replica of benchmark.replicas) {
+    if (replica.points.length < 2 || !replica.points.some((point) => point.threads === 1)) {
+      continue;
+    }
+    const replicaDirectory = path.join(directory, "replicas", `replica-${replica.replica}`);
+    ensureDirectory(replicaDirectory);
+    const titlePrefix = `${benchmark.name}, replica ${replica.replica}`;
+    const replicaBaseline = replica.points.find((point) => point.threads === 1).median;
+    fs.writeFileSync(path.join(replicaDirectory, "time-vs-threads.svg"), renderChart({
+      ideal: replica.points.map((point) => ({ x: point.threads, y: replicaBaseline / point.threads })),
+      points: replica.points.map((point) => ({ x: point.threads, y: point.median })),
+      title: `${titlePrefix}: runtime scaling`,
+      yLabel: "Median time (seconds)",
+    }));
+    fs.writeFileSync(path.join(replicaDirectory, "speedup-vs-threads.svg"), renderChart({
+      ideal: replica.points.map((point) => ({ x: point.threads, y: point.threads })),
+      points: replica.points.map((point) => ({ x: point.threads, y: point.speedup })),
+      title: `${titlePrefix}: speedup`,
+      yLabel: "Speedup",
+    }));
+    if (benchmark.workload > 0) {
+      fs.writeFileSync(path.join(replicaDirectory, "rate-vs-threads.svg"), renderChart({
+        points: replica.points.map((point) => ({ x: point.threads, y: point.median_rate })),
+        title: `${titlePrefix}: throughput scaling`,
+        yLabel: `${benchmark.workload_unit} / second`,
+      }));
+    }
   }
 }
 
