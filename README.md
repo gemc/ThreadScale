@@ -1,6 +1,8 @@
 # ThreadScale
 
 [![Test](https://github.com/gemc/ThreadScale/actions/workflows/test.yml/badge.svg)][test-workflow]
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-ThreadScale-2088FF?logo=githubactions&logoColor=white)][marketplace]
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ThreadScale is a language-independent GitHub Action for measuring application strong scaling. It runs the same
 command at several thread counts and reports runtime, throughput, speedup, and parallel efficiency. It also
@@ -9,6 +11,15 @@ transfers partial results through artifacts, and produces the final report.
 
 It works with command-line thread arguments and environment variables such as `OMP_NUM_THREADS`,
 `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `JULIA_NUM_THREADS`, and `RAYON_NUM_THREADS`.
+
+<p align="center">
+  <img src="example.png" alt="ThreadScale Job Summary showing runner configurations, a thread-scaling table, and a
+rate-vs-threads chart" width="760">
+  <br>
+  <em>A ThreadScale Job Summary from a replicated sweep: the runners that measured the benchmark, a table of median
+time, speedup, and parallel efficiency at each thread count, and a rate-vs-threads chart with labeled points — all
+rendered inline in GitHub Actions, with no externally hosted images.</em>
+</p>
 
 ## Quick start: one-job sweep
 
@@ -215,3 +226,4 @@ also use that stable major tag.
 ThreadScale is available under the [MIT License](LICENSE).
 
 [test-workflow]: https://github.com/gemc/ThreadScale/actions/workflows/test.yml
+[marketplace]: https://github.com/marketplace/actions/threadscale
