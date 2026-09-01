@@ -46,7 +46,9 @@ async function benchmark(options) {
     benchmarkName,
     command,
     outputDirectory,
+    minimumDurationSeconds = 0,
     replica,
+    runnerInfo = detectCpuInfo(),
     runs,
     threadEnvironment,
     threads,
@@ -62,9 +64,29 @@ async function benchmark(options) {
 
   const measurements = [];
   for (const thread of threads) {
-    for (let run = 1; run <= warmupRuns + runs; run += 1) {
-      const warmup = run <= warmupRuns;
-      const measuredRun = warmup ? 0 : run - warmupRuns;
+    for (let warmupRun = 1; warmupRun <= warmupRuns; warmupRun += 1) {
+      const expanded = expandCommand(command, {
+        benchmark: benchmarkName,
+        replica,
+        run: 0,
+        threads: thread,
+      });
+      const environment = { ...process.env };
+      if (threadEnvironment) {
+        environment[threadEnvironment] = String(thread);
+      }
+      console.log(`\n[${benchmarkName}] threads=${thread} warmup=${warmupRun}`);
+      console.log(`$ ${expanded}`);
+      const seconds = await runCommand(expanded, {
+        cwd: workingDirectory,
+        env: environment,
+        timeoutSeconds,
+      });
+      console.log(`completed in ${seconds.toFixed(6)} s`);
+    }
+    let measuredDuration = 0;
+    let measuredRun = 1;
+    while (measuredRun <= runs || measuredDuration < minimumDurationSeconds) {
       const expanded = expandCommand(command, {
         benchmark: benchmarkName,
         replica,
@@ -75,7 +97,7 @@ async function benchmark(options) {
       if (threadEnvironment) {
         environment[threadEnvironment] = String(thread);
       }
-      console.log(`\n[${benchmarkName}] threads=${thread} ${warmup ? "warmup" : `run=${measuredRun}`}`);
+      console.log(`\n[${benchmarkName}] threads=${thread} run=${measuredRun}`);
       console.log(`$ ${expanded}`);
       const seconds = await runCommand(expanded, {
         cwd: workingDirectory,
@@ -83,9 +105,9 @@ async function benchmark(options) {
         timeoutSeconds,
       });
       console.log(`completed in ${seconds.toFixed(6)} s`);
-      if (!warmup) {
-        measurements.push({ run: measuredRun, seconds, threads: thread });
-      }
+      measurements.push({ run: measuredRun, seconds, threads: thread });
+      measuredDuration += seconds;
+      measuredRun += 1;
     }
   }
 
@@ -97,12 +119,16 @@ async function benchmark(options) {
     created_at: new Date().toISOString(),
     measurements,
     replica,
-    runner: detectCpuInfo(),
+    runner: runnerInfo,
     workload,
     workload_unit: workloadUnit,
   };
   ensureDirectory(outputDirectory);
-  const filename = path.join(outputDirectory, `${slugify(benchmarkName)}-r${replica}-${process.pid}.json`);
+  const threadLabel = [...new Set(measurements.map((measurement) => measurement.threads))].join("-");
+  const filename = path.join(
+    outputDirectory,
+    `${slugify(benchmarkName)}-r${replica}-t${threadLabel}-${process.pid}.json`,
+  );
   fs.writeFileSync(filename, `${JSON.stringify(result, null, 2)}\n`, "utf8");
   return { filename, result };
 }

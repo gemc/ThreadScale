@@ -5,6 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { expandCommand } = require("../src/benchmark");
+const { parseArgs, runLocal } = require("../src/cli");
 const { parseLscpu } = require("../src/cpu");
 const { buildMatrix, parseBenchmarks, parseThreadSpec } = require("../src/matrix");
 const {
@@ -33,6 +34,27 @@ test("auto and power-of-two thread specifications respect the visible CPU count"
   assert.deepEqual(parseThreadSpec("2,3,4,1", 4), [2, 3, 4, 1]);
   assert.throws(() => parseThreadSpec("1,9", 8), /exceeds/);
   assert.throws(() => parseThreadSpec("9,1", 8), /exceeds/);
+});
+
+test("local CLI options are validated", () => {
+  const options = parseArgs([
+    "--threads", "powers-of-two",
+    "--max-threads", "64",
+    "--strategy", "replicated-sweep",
+    "--replicas", "2",
+    "gemc -nthreads={threads}",
+  ]);
+  assert.equal(options.command, "gemc -nthreads={threads}");
+  assert.equal(options.threads, "powers-of-two");
+  assert.equal(options.maxThreads, 64);
+  assert.equal(options.replicas, 2);
+  assert.throws(() => parseArgs([]), /provide a benchmark command/);
+  assert.throws(
+    () => parseArgs(["gemc {threads}", "--replicas", "2"]),
+    /requires --strategy replicated-sweep/,
+  );
+  assert.match(parseArgs(["--", "gemc", "-nthreads={threads}"]).command, /gemc.*nthreads/);
+  assert.equal(parseArgs(["gemc {threads}", "--fan-out", "thread-sharded"]).strategy, "thread-sharded");
 });
 
 test("all three matrix strategies have stable shapes", () => {
@@ -265,4 +287,58 @@ test("report mode writes portable artifacts and plots", () => {
     assert.equal(fs.existsSync(path.join(output, filename)), true, filename);
   }
   fs.rmSync(temporary, { recursive: true, force: true });
+});
+
+test("local CLI runs a benchmark and writes the standard report", async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-local-test-"));
+  const output = path.join(temporary, "report");
+  try {
+    const options = parseArgs([
+      `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5)" -- {threads}`,
+      "--name", "local-demo",
+      "--threads", "1",
+      "--max-threads", "1",
+      "--duration", "0.1",
+      "--runs", "1",
+      "--warmup-runs", "0",
+      "--timeout-seconds", "30",
+      "--working-directory", temporary,
+      "--workload", "10",
+      "--output-dir", output,
+      "--summary-plots", "none",
+    ]);
+    const result = await runLocal(options);
+    assert.equal(fs.existsSync(result.summaryFile), true);
+    assert.equal(fs.existsSync(path.join(output, "scaling.json")), true);
+    assert.match(fs.readFileSync(result.summaryFile, "utf8"), /local-demo/);
+    assert.equal(result.report.benchmarks[0].points[0].count >= 2, true);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("local thread-sharded strategy retains every partial result", async (context) => {
+  if (typeof os.availableParallelism === "function" && os.availableParallelism() < 2) {
+    context.skip("requires two visible CPUs");
+    return;
+  }
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-sharded-test-"));
+  const output = path.join(temporary, "report");
+  try {
+    const options = parseArgs([
+      `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5)" -- {threads}`,
+      "--threads", "1,2",
+      "--max-threads", "2",
+      "--strategy", "thread-sharded",
+      "--runs", "1",
+      "--warmup-runs", "0",
+      "--output-dir", output,
+      "--summary-plots", "none",
+    ]);
+    const result = await runLocal(options);
+    assert.deepEqual(result.report.benchmarks[0].points.map((point) => point.threads), [1, 2]);
+    assert.equal(fs.readdirSync(`${output}.parts`).filter((name) => name.endsWith(".json")).length, 2);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });

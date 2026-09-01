@@ -4,11 +4,14 @@
   "private": true,
   "description": "Language-independent strong-scaling GitHub Action",
   "license": "MIT",
+  "bin": {
+    "test_scaling": "src/cli.js"
+  },
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "check": "node --check src/main.js && node --check src/report.js",
+    "check": "node --check src/cli.js && node --check src/main.js && node --check src/report.js",
     "test": "node --test"
   }
 }

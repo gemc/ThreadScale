@@ -75,6 +75,7 @@ async function runBenchmark() {
     command: getInput("command"),
     outputDirectory: getInput("output-dir", "thread-scaling"),
     replica: getIntegerInput("replica", 1, 1),
+    runnerInfo: cpu,
     runs: getIntegerInput("runs", 5, 1),
     threadEnvironment: getInput("thread-env"),
     threads,

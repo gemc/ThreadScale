@@ -460,7 +460,7 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
     }
   }
   lines.push(
-    "> GitHub-hosted runners are suitable for regression signals, not publication-quality benchmarking.",
+    "> For publication-quality results, use an otherwise idle machine with stable CPU placement and frequency.",
     "",
   );
   return lines.join("\n");

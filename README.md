@@ -9,6 +9,11 @@ command at several thread counts and reports runtime, throughput, speedup, and p
 ships a reusable workflow that discovers the runner's CPUs, fans measurements out to dynamic matrix jobs,
 transfers partial results through artifacts, and produces the final report.
 
+ThreadScale can be used in two ways:
+
+- as `gemc/ThreadScale@v1` in GitHub Actions;
+- as the included `./test_scaling` command on a local workstation or compute node.
+
 It works with command-line thread arguments and environment variables such as `OMP_NUM_THREADS`,
 `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `JULIA_NUM_THREADS`, and `RAYON_NUM_THREADS`.
 
@@ -55,6 +60,72 @@ For OpenMP or another environment-variable interface:
 
 The command template also accepts `{run}`, `{replica}`, and `{benchmark}` placeholders. These are useful for
 giving every invocation a distinct output filename.
+
+## Local command-line runs
+
+Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrary command containing the
+`{threads}` placeholder:
+
+```shell
+git clone https://github.com/gemc/ThreadScale.git
+cd ThreadScale
+
+./test_scaling 'gemc example.yaml -n=50000 -nthreads={threads} -gstreamer=[]' \
+  --name scintillator-barrel \
+  --threads powers-of-two \
+  --max-threads 64 \
+  --duration 60 \
+  --runs 3 \
+  --warmup-runs 1 \
+  --workload 50000 \
+  --workload-unit events \
+  --output-dir thread-scaling
+```
+
+The command is a template, and it must connect ThreadScale's selected count to the program's own threading
+interface. ThreadScale replaces `{threads}` before every invocation. For the GEMC example above, the measured
+commands include:
+
+```text
+threads=1  -> gemc example.yaml -n=50000 -nthreads=1  -gstreamer=[]
+threads=2  -> gemc example.yaml -n=50000 -nthreads=2  -gstreamer=[]
+threads=4  -> gemc example.yaml -n=50000 -nthreads=4  -gstreamer=[]
+...
+threads=64 -> gemc example.yaml -n=50000 -nthreads=64 -gstreamer=[]
+```
+
+For another application, put `{threads}` in whatever argument that application uses, such as
+`./solver --workers={threads}` or `python simulation.py --processes {threads}`. ThreadScale cannot infer that
+program-specific argument: a direct command must contain `{threads}` unless `--thread-env` is supplied.
+
+This tests `1,2,4,8,16,32,64` when 64 CPUs are visible. Use `--threads auto` to test every integer from one
+through the detected or configured maximum. `--duration` is the minimum cumulative measured time for each
+thread count, while `--runs` is the minimum sample count; measurement continues until both requirements are
+satisfied.
+
+The local strategies use the same matrix and aggregation logic as the Action:
+
+- `single-sweep` runs one complete sweep;
+- `thread-sharded` stores each thread count as a separate partial result;
+- `replicated-sweep --replicas N` runs `N` complete sweeps with rotated thread-count ordering.
+
+`--fan-out` is accepted as an alias for `--strategy`.
+
+Local measurements always execute sequentially so competing benchmark commands do not distort each other. For
+programs controlled by an environment variable, omit `{threads}` and use, for example,
+`--thread-env OMP_NUM_THREADS`. Options may precede a command after `--` when shell quoting is inconvenient.
+
+For each selected value `N`, the environment-variable form runs the equivalent of
+`OMP_NUM_THREADS=N ./myprogram`. In both forms, `N` is the number of threads requested from the application.
+The operating system schedules those threads on the CPUs available to the process; ThreadScale does not pin
+threads to particular physical cores. CPU discovery prevents automatic thread lists from exceeding the visible
+logical CPUs, while `--max-threads` can cap the sweep below the detected count. The report records
+physical-core, SMT, affinity, and cgroup information so the distinction remains visible when interpreting the
+results.
+
+The command prints `summary.md` to the terminal and creates the same CSV, JSON, Markdown, Mermaid summary, and
+SVG artifacts as report mode. Raw partial JSON files are retained in a sibling directory ending in `.parts`.
+The output and partial directories must not already exist.
 
 ## Distributed modes
 
@@ -222,6 +293,14 @@ To publish in the GitHub Actions Marketplace, create a release whose tag also ha
 `v1`. Consumers should use the major tag or pin a full commit SHA when reproducibility or supply-chain policy
 requires it. Publish the `v1` tag before consumers invoke the reusable workflow; its internal Action references
 also use that stable major tag.
+
+## Contributing
+
+ThreadScale is free and open. Contributions are welcome, and we are happy to
+develop it together — a pull request is the way to go. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, local
+checks, and the pull-request checklist.
+
+For questions or direct contact, open an issue or email **ungaro@jlab.org** (Maurizio Ungaro).
 
 ThreadScale is available under the [MIT License](LICENSE).
 
