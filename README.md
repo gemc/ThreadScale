@@ -63,6 +63,8 @@ giving every invocation a distinct output filename.
 
 ## Local command-line runs
 
+> **Upcoming in v1.0.2:** The local `test_scaling` command is not included in the published v1.0.1 release.
+
 Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrary command containing the
 `{threads}` placeholder:
 
@@ -209,30 +211,38 @@ or included in project documentation. They mark every measured point with an out
 next to the marker.
 
 The GitHub Job Summary renders a Mermaid time-vs-threads chart and rate-vs-threads chart after each benchmark
-table. Mermaid 11.16 and newer place a dot and y-value label directly above every measured point on each line.
-The y-axis supplies the unit, while compact numeric labels and inward-aligned endpoint labels avoid clipping.
-This keeps the markers attached to the plot without requiring an externally hosted image.
+table. Mermaid's `xychart` lines do not support point labels, so each summary chart is followed by a
+measured-point key containing a dot, thread count, and y-value. The table above the charts contains the complete
+statistics for each point.
+
+> **Upcoming in v1.0.2:** Numeric-only Mermaid series fix summary-chart parsing in GitHub.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
 Summary, not the SVG files stored in the report artifact.
 
-The job summary contains a table like this:
+The job summary contains a table like this (the effective serial fraction is upcoming in v1.0.2):
 
 ```text
-Threads   Median time   Speedup   Efficiency   Median rate   Samples
-      1       18.420 s     1.00x       100.0%      54.29/s        20
-      2        9.730 s     1.89x        94.7%     102.77/s        20
-      4        5.210 s     3.54x        88.4%     191.94/s        20
-      8        3.280 s     5.62x        70.2%     304.88/s        20
+Threads   Median time   Speedup   Efficiency   Effective serial   Median rate   Samples
+      1       18.420 s     1.00x       100.0%                  —      54.29/s        20
+      2        9.730 s     1.89x        94.7%               5.8%     102.77/s        20
+      4        5.210 s     3.54x        88.4%               4.3%     191.94/s        20
+      8        3.280 s     5.62x        70.2%               6.1%     304.88/s        20
 ```
 
-Speedup and efficiency use the median one-thread runtime:
+Speedup, efficiency, and effective serial fraction use the median one-thread runtime:
 
 ```text
 S(N) = T(1) / T(N)
 E(N) = S(N) / N × 100%
+F(N) = (1 / S(N) - 1 / N) / (1 - 1 / N) × 100%
 ```
+
+Lower effective serial fractions are better. The value approximates how much of the application's execution
+behaves serially, but it also includes parallel overhead, contention, and measurement effects; it is not a
+literal percentage of source code. The fraction is undefined at one thread, and superlinear scaling can produce
+a negative estimate.
 
 The aggregate table includes runtime standard deviation. An expandable per-replica table and the SVG files
 under `replicas/` preserve each runner's curve so heterogeneous hosted machines are not hidden by pooled

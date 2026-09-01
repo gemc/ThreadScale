@@ -12,6 +12,7 @@ const {
   aggregate,
   buildMarkdown,
   createReport,
+  effectiveSerialFraction,
   median,
   renderChart,
   renderMermaidRateChart,
@@ -136,10 +137,18 @@ test("statistics and scaling aggregation use the median one-thread baseline", ()
     },
   ]);
   assert.equal(benchmarks[0].points[0].median, 11);
+  assert.equal(benchmarks[0].points[0].effective_serial_fraction, null);
   assert.equal(benchmarks[0].points[1].speedup, 2);
+  assert.equal(benchmarks[0].points[1].effective_serial_fraction, 0);
   assert.equal(benchmarks[0].points[1].efficiency_percent, 100);
   assert.equal(benchmarks[0].points[1].median_rate, 20);
   assert.equal(benchmarks[0].replicas[0].points[1].speedup, 2);
+});
+
+test("effective serial fraction follows the Amdahl and Karp-Flatt estimate", () => {
+  assert.equal(effectiveSerialFraction(1, 1), null);
+  const measured = effectiveSerialFraction(31.3 / 7.551, 8);
+  assert.ok(Math.abs(measured - 0.132852578) < 1e-9);
 });
 
 test("replicated sweeps use median paired speedups", () => {
@@ -169,8 +178,8 @@ test("the Markdown summary supports time and rate plots", () => {
     workload_unit: "events",
     replicas: [{
       points: [
-        { median: 2, median_rate: 10, speedup: 1, threads: 1 },
-        { median: 1.2, median_rate: 16.7, speedup: 1.67, threads: 2 },
+        { effective_serial_fraction: null, median: 2, median_rate: 10, speedup: 1, threads: 1 },
+        { effective_serial_fraction: 0.1976, median: 1.2, median_rate: 16.7, speedup: 1.67, threads: 2 },
       ],
       replica: 1,
       runner: { physical_cores: 1, threads_per_core: 2, visible_cpus: 2 },
@@ -180,6 +189,7 @@ test("the Markdown summary supports time and rate plots", () => {
       {
         count: 1,
         efficiency_percent: 100,
+        effective_serial_fraction: null,
         median: 2,
         median_rate: 10,
         speedup: 1,
@@ -189,6 +199,7 @@ test("the Markdown summary supports time and rate plots", () => {
       {
         count: 1,
         efficiency_percent: 83.3,
+        effective_serial_fraction: 0.1976,
         median: 1.2,
         median_rate: 16.7,
         speedup: 1.67,
@@ -200,12 +211,13 @@ test("the Markdown summary supports time and rate plots", () => {
   const timeChart = renderMermaidTimeChart(benchmark);
   const rateChart = renderMermaidRateChart(benchmark);
   assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
-  assert.match(timeChart, /line \[2 "● 2\.00", 1\.2 "● 1\.20"\]/);
-  assert.match(rateChart, /line \[10 "● 10\.0", 16\.7 "● 16\.7"\]/);
+  assert.match(timeChart, /line \[2, 1\.2\]/);
+  assert.match(timeChart, /Measured points.*🔵 `1 thread: 2\.00 s`.*🔵 `2 threads: 1\.20 s`/);
+  assert.match(rateChart, /line \[10, 16\.7\]/);
+  assert.match(rateChart, /Measured points.*🔵 `1 thread: 10\.0 events\/s`/);
   assert.match(rateChart, /plotColorPalette: "#0969da"/);
-  assert.match(rateChart, /text:first-child \{ text-anchor: start; \}/);
-  assert.match(rateChart, /text:last-child \{ text-anchor: end; \}/);
-  assert.doesNotMatch(timeChart, /Measured points/);
+  assert.doesNotMatch(timeChart, /line \[[^\]]*"/);
+  assert.doesNotMatch(rateChart, /line \[[^\]]*"/);
   assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart/);
   assert.match(buildMarkdown([benchmark], "time"), /### Time vs threads/);
   assert.doesNotMatch(buildMarkdown([benchmark], "time"), /### Rate vs threads/);
@@ -213,6 +225,9 @@ test("the Markdown summary supports time and rate plots", () => {
   assert.doesNotMatch(buildMarkdown([benchmark], "rate"), /### Time vs threads/);
   assert.match(buildMarkdown([benchmark], "both"), /### Time vs threads[\s\S]*### Rate vs threads/);
   assert.match(buildMarkdown([benchmark], "both"), /Std\. dev\./);
+  assert.match(buildMarkdown([benchmark], "both"), /Effective serial/);
+  assert.match(buildMarkdown([benchmark], "both"), /Lower is better/);
+  assert.match(buildMarkdown([benchmark], "both"), /19\.8%/);
   assert.match(buildMarkdown([benchmark], "both"), /Per-replica sweeps \(1\)/);
   assert.match(buildMarkdown([benchmark], "both"), /1 OS physical cores, 2 threads\/core/);
   assert.throws(() => buildMarkdown([benchmark], "invalid"), /summary-plots/);
@@ -266,7 +281,10 @@ test("report mode writes portable artifacts and plots", () => {
   assert.equal(result.failures.length, 0);
   assert.deepEqual(result.report.benchmarks[0].replicas.map((replica) => replica.replica), [1, 2]);
   const summary = fs.readFileSync(result.summaryFile, "utf8");
+  const csv = fs.readFileSync(result.csvFile, "utf8");
   assert.match(summary, /Runner configurations/);
+  assert.match(summary, /Effective serial fraction/);
+  assert.match(csv, /effective_serial_fraction/);
   assert.match(summary, /### Time vs threads/);
   assert.match(summary, /### Rate vs threads/);
   for (const filename of [

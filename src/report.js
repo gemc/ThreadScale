@@ -25,6 +25,16 @@ function statistics(values) {
   };
 }
 
+function effectiveSerialFraction(speedup, threads) {
+  const measuredSpeedup = Number(speedup);
+  const threadCount = Number(threads);
+  if (!Number.isFinite(measuredSpeedup) || measuredSpeedup <= 0
+      || !Number.isFinite(threadCount) || threadCount <= 1) {
+    return null;
+  }
+  return ((1 / measuredSpeedup) - (1 / threadCount)) / (1 - (1 / threadCount));
+}
+
 function summarizeReplica(partial, workload) {
   const measurements = new Map();
   for (const measurement of partial.measurements) {
@@ -42,6 +52,7 @@ function summarizeReplica(partial, workload) {
     if (baseline) {
       point.speedup = baseline.median / point.median;
       point.efficiency_percent = (100 * point.speedup) / point.threads;
+      point.effective_serial_fraction = effectiveSerialFraction(point.speedup, point.threads);
     }
     if (workload > 0) {
       point.median_rate = workload / point.median;
@@ -125,6 +136,7 @@ function aggregate(partials) {
         ? median(pairedSpeedups)
         : baseline.median / point.median;
       point.efficiency_percent = (100 * point.speedup) / point.threads;
+      point.effective_serial_fraction = effectiveSerialFraction(point.speedup, point.threads);
       if (benchmark.workload > 0) {
         point.median_rate = benchmark.workload / point.median;
         point.mean_rate = benchmark.workload / point.mean;
@@ -289,6 +301,7 @@ function buildCsv(benchmarks) {
     "min_seconds",
     "max_seconds",
     "speedup",
+    "effective_serial_fraction",
     "paired_speedup_samples",
     "efficiency_percent",
     "median_rate",
@@ -306,6 +319,7 @@ function buildCsv(benchmarks) {
         point.min,
         point.max,
         point.speedup,
+        point.effective_serial_fraction ?? "",
         point.paired_speedup_samples,
         point.efficiency_percent,
         point.median_rate || "",
@@ -316,18 +330,22 @@ function buildCsv(benchmarks) {
   return `${rows.map((row) => row.map(csvEscape).join(",")).join("\n")}\n`;
 }
 
-function mermaidPoint(value) {
-  const coordinate = Number(value.toPrecision(8));
-  return `${coordinate} "● ${numberLabel(value)}"`;
+function mermaidCoordinate(value) {
+  return Number(value.toPrecision(8));
+}
+
+function renderMeasuredPoints(benchmark, value, unit) {
+  const labels = benchmark.points.map((point) => {
+    const threadLabel = `${point.threads} thread${point.threads === 1 ? "" : "s"}`;
+    return `🔵 \`${threadLabel}: ${numberLabel(value(point))} ${unit}\``;
+  });
+  return `**Measured points:** ${labels.join(" · ")}`;
 }
 
 function mermaidChartHeader() {
   return [
     "---",
     "config:",
-    "  themeCSS: |",
-    "    .line-plot-0 .labels text:first-child { text-anchor: start; }",
-    "    .line-plot-0 .labels text:last-child { text-anchor: end; }",
     "  themeVariables:",
     "    xyChart:",
     '      plotColorPalette: "#0969da"',
@@ -339,7 +357,7 @@ function mermaidChartHeader() {
 function renderMermaidTimeChart(benchmark) {
   const title = `${benchmark.name}: time vs threads`.replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const times = benchmark.points.map((point) => mermaidPoint(point.median)).join(", ");
+  const times = benchmark.points.map((point) => mermaidCoordinate(point.median)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
@@ -352,6 +370,8 @@ function renderMermaidTimeChart(benchmark) {
     `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
     `    line [${times}]`,
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median, "s"),
   ].join("\n");
 }
 
@@ -359,7 +379,7 @@ function renderMermaidRateChart(benchmark) {
   const title = `${benchmark.name}: rate vs threads`.replace(/["\n\r]/g, "'");
   const unit = String(benchmark.workload_unit).replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const rates = benchmark.points.map((point) => mermaidPoint(point.median_rate)).join(", ");
+  const rates = benchmark.points.map((point) => mermaidCoordinate(point.median_rate)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median_rate), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
@@ -372,6 +392,8 @@ function renderMermaidRateChart(benchmark) {
     `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
     `    line [${rates}]`,
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median_rate, `${unit}/s`),
   ].join("\n");
 }
 
@@ -400,13 +422,14 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
     lines.push("");
     if (benchmark.workload > 0) {
       lines.push(
-        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Median rate | Samples |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
+        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Effective serial | "
+          + "Median rate | Samples |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
       );
     } else {
       lines.push(
-        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Samples |",
-        "|---:|---:|---:|---:|---:|---:|",
+        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Effective serial | Samples |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
       );
     }
     for (const point of benchmark.points) {
@@ -416,6 +439,9 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
         `${point.standard_deviation.toFixed(3)} s`,
         `${point.speedup.toFixed(2)}x`,
         `${point.efficiency_percent.toFixed(1)}%`,
+        Number.isFinite(point.effective_serial_fraction)
+          ? `${(100 * point.effective_serial_fraction).toFixed(1)}%`
+          : "—",
       ];
       if (benchmark.workload > 0) {
         cells.push(`${point.median_rate.toFixed(2)} ${benchmark.workload_unit}/s`);
@@ -423,7 +449,14 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
       cells.push(String(point.count));
       lines.push(`| ${cells.join(" | ")} |`);
     }
-    lines.push("");
+    lines.push(
+      "",
+      "> **Effective serial fraction:** Lower is better. This Amdahl/Karp–Flatt estimate approximates",
+      "> how much of the application's execution behaves serially. It also includes parallel overhead and",
+      "> contention, so it is not a literal percentage of source code.",
+      "> Negative values can result from superlinear scaling or measurement noise.",
+      "",
+    );
     const replicaSweeps = benchmark.replicas.filter((replica) =>
       replica.points.length > 1 && replica.points.some((point) => point.threads === 1));
     if (replicaSweeps.length > 0) {
@@ -431,18 +464,22 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
         "<details>",
         `<summary>Per-replica sweeps (${replicaSweeps.length})</summary>`,
         "",
-        "| Replica | Runner | Threads | Median time | Speedup | Median rate |",
-        "|---:|:---|---:|---:|---:|---:|",
+        "| Replica | Runner | Threads | Median time | Speedup | Effective serial | Median rate |",
+        "|---:|:---|---:|---:|---:|---:|---:|",
       );
       for (const replica of replicaSweeps) {
         for (const [index, point] of replica.points.entries()) {
           const rate = benchmark.workload > 0
             ? `${point.median_rate.toFixed(2)} ${benchmark.workload_unit}/s`
             : "—";
+          const effectiveSerial = Number.isFinite(point.effective_serial_fraction)
+            ? `${(100 * point.effective_serial_fraction).toFixed(1)}%`
+            : "—";
           lines.push(
             `| ${index === 0 ? replica.replica : ""} | `
               + `${index === 0 ? runnerDescription(replica.runner) : ""} | ${point.threads} | `
-              + `${point.median.toFixed(3)} s | ${point.speedup.toFixed(2)}x | ${rate} |`,
+              + `${point.median.toFixed(3)} s | ${point.speedup.toFixed(2)}x | `
+              + `${effectiveSerial} | ${rate} |`,
           );
         }
       }
@@ -567,6 +604,7 @@ module.exports = {
   buildCsv,
   buildMarkdown,
   createReport,
+  effectiveSerialFraction,
   loadPartials,
   mean,
   median,
