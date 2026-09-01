@@ -300,7 +300,8 @@ ThreadScale is free and open. Contributions are welcome, and we are happy to
 develop it together — a pull request is the way to go. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, local
 checks, and the pull-request checklist.
 
-For questions or direct contact, open an issue or email **ungaro@jlab.org** (Maurizio Ungaro).
+For questions or direct contact, open an issue or email **ungaro@jlab.org** 
+([Maurizio Ungaro](https://github.com/maureeungaro/maureeungaro)).
 
 ThreadScale is available under the [MIT License](LICENSE).
 
