@@ -5,7 +5,7 @@ const { detectCpuInfo } = require("./cpu");
 const { ensureDirectory, slugify } = require("./utils");
 
 function expandCommand(template, values) {
-  return template.replace(/\{(threads|run|replica|benchmark)\}/g, (_, key) => String(values[key]));
+  return template.replace(/\{(threads|workload|run|replica|benchmark)\}/g, (_, key) => String(values[key]));
 }
 
 function runCommand(command, { cwd, env, timeoutSeconds }) {
@@ -70,6 +70,7 @@ async function benchmark(options) {
         replica,
         run: 0,
         threads: thread,
+        workload,
       });
       const environment = { ...process.env };
       if (threadEnvironment) {
@@ -92,6 +93,7 @@ async function benchmark(options) {
         replica,
         run: measuredRun,
         threads: thread,
+        workload,
       });
       const environment = { ...process.env };
       if (threadEnvironment) {

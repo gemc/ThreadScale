@@ -58,12 +58,11 @@ For OpenMP or another environment-variable interface:
     threads: powers-of-two
 ```
 
-The command template also accepts `{run}`, `{replica}`, and `{benchmark}` placeholders. These are useful for
-giving every invocation a distinct output filename.
+The command template also accepts `{workload}`, `{run}`, `{replica}`, and `{benchmark}` placeholders. The
+`{workload}` value comes from the `workload` input; the other placeholders are useful for giving every
+invocation a distinct output filename.
 
 ## Local command-line runs
-
-> **Upcoming in v1.0.2:** The local `test_scaling` command is not included in the published v1.0.1 release.
 
 Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrary command containing the
 `{threads}` placeholder:
@@ -72,7 +71,7 @@ Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrar
 git clone https://github.com/gemc/ThreadScale.git
 cd ThreadScale
 
-./test_scaling 'gemc example.yaml -n=50000 -nthreads={threads} -gstreamer=[]' \
+./test_scaling 'gemc example.yaml -n={workload} -nthreads={threads} -gstreamer=[]' \
   --name scintillator-barrel \
   --threads powers-of-two \
   --max-threads 64 \
@@ -95,6 +94,10 @@ threads=4  -> gemc example.yaml -n=50000 -nthreads=4  -gstreamer=[]
 ...
 threads=64 -> gemc example.yaml -n=50000 -nthreads=64 -gstreamer=[]
 ```
+
+Using `{workload}` in the command keeps the executed amount of work synchronized with the value used to
+calculate rates. In this example, `--workload 50000` supplies `-n=50000` and reports the resulting rate in
+events per second.
 
 For another application, put `{threads}` in whatever argument that application uses, such as
 `./solver --workers={threads}` or `python simulation.py --processes {threads}`. ThreadScale cannot infer that
@@ -165,7 +168,7 @@ jobs:
         [
           {
             "name": "solver",
-            "command": "./build/solver --threads {threads} --input medium.dat",
+            "command": "./build/solver --threads {threads} --cells {workload} --input medium.dat",
             "working_directory": ".",
             "workload": 1000000,
             "workload_unit": "cells"
@@ -215,13 +218,11 @@ table. Mermaid's `xychart` lines do not support point labels, so each summary ch
 measured-point key containing a dot, thread count, and y-value. The table above the charts contains the complete
 statistics for each point.
 
-> **Upcoming in v1.0.2:** Numeric-only Mermaid series fix summary-chart parsing in GitHub.
-
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
 Summary, not the SVG files stored in the report artifact.
 
-The job summary contains a table like this (the effective serial fraction is upcoming in v1.0.2):
+The job summary contains a table like this:
 
 ```text
 Threads   Median time   Speedup   Efficiency   Effective serial   Median rate   Samples

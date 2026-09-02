@@ -29,7 +29,7 @@ Options:
   --thread-env NAME       set an environment variable instead of requiring {threads}
   --timeout-seconds N     timeout for each invocation (default: 300)
   --working-directory DIR command working directory (default: current directory)
-  --workload NUMBER       work completed by one invocation; enables rate reporting
+  --workload NUMBER       work per invocation; supplies {workload} and enables rate reporting
   --workload-unit UNIT    rate unit such as events or cells (default: items)
   --output-dir DIR        final report directory (default: thread-scaling)
   --summary-plots VALUE   none, time, rate, or both (default: both)

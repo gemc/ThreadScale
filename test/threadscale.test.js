@@ -108,13 +108,14 @@ test("benchmark JSON and command placeholders are validated and expanded", () =>
   assert.deepEqual(parseBenchmarks(JSON.stringify(BENCHMARKS)), BENCHMARKS);
   assert.throws(() => parseBenchmarks("[]"), /non-empty/);
   assert.equal(
-    expandCommand("run -t {threads} -r {run} -p {replica} -b {benchmark}", {
+    expandCommand("run -t {threads} -n {workload} -r {run} -p {replica} -b {benchmark}", {
       benchmark: "demo",
       replica: 2,
       run: 3,
       threads: 4,
+      workload: 100,
     }),
-    "run -t 4 -r 3 -p 2 -b demo",
+    "run -t 4 -n 100 -r 3 -p 2 -b demo",
   );
 });
 
@@ -310,9 +311,10 @@ test("report mode writes portable artifacts and plots", () => {
 test("local CLI runs a benchmark and writes the standard report", async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-local-test-"));
   const output = path.join(temporary, "report");
+  const checkWorkload = "if (!process.argv.includes('10')) process.exit(2); setTimeout(() => {}, 5)";
   try {
     const options = parseArgs([
-      `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5)" -- {threads}`,
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(checkWorkload)} -- {threads} {workload}`,
       "--name", "local-demo",
       "--threads", "1",
       "--max-threads", "1",

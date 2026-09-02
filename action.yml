@@ -12,7 +12,7 @@ inputs:
     required: false
     default: benchmark
   command:
-    description: Command template. Use {threads}, {run}, {replica}, and {benchmark} placeholders.
+    description: Command template. Use {threads}, {workload}, {run}, {replica}, and {benchmark} placeholders.
     required: false
   threads:
     description: auto, powers-of-two, a comma-separated list, or an inclusive range such as 1-8.
@@ -46,7 +46,7 @@ inputs:
     required: false
     default: "1"
   workload:
-    description: Work completed per invocation; enables the rate plot when greater than zero.
+    description: Work per invocation; supplies {workload} and enables the rate plot when greater than zero.
     required: false
     default: "0"
   workload-unit:
