@@ -22,7 +22,7 @@ It works with command-line thread arguments and environment variables such as `O
 rate-vs-threads chart" width="760">
   <br>
   <em>A ThreadScale Job Summary from a replicated sweep: the runners that measured the benchmark, a table of median
-time, speedup, and parallel efficiency at each thread count, and a rate-vs-threads chart with labeled points — all
+  time, speedup, and parallel efficiency at each thread count, and a rate-vs-threads chart with measured values — all
 rendered inline in GitHub Actions, with no externally hosted images.</em>
 </p>
 
@@ -218,9 +218,10 @@ or included in project documentation. They mark every measured point with an out
 next to the marker.
 
 The GitHub Job Summary renders Mermaid time-vs-threads and rate-vs-threads charts after each benchmark table.
-Every line point has a colored bullet and y-value at its measured coordinate. Benchmarks with the same explicit
-`comparison_group` share one chart; `comparison_label` identifies each series in the compact color legend.
-The table above the charts contains the complete statistics for each point.
+GitHub's embedded Mermaid version does not yet accept inline labels on line points, so a measured-value key
+follows each chart. Benchmarks with the same explicit `comparison_group` share one chart; `comparison_label`
+identifies each series in the compact color legend and its matching value row. The table above the charts
+contains the complete statistics for each point.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job

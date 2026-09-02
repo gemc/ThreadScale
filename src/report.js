@@ -339,10 +339,19 @@ function mermaidCoordinate(value) {
 }
 
 function mermaidLine(points, value) {
-  const values = points
-    .map((point) => `${mermaidCoordinate(value(point))} "● ${numberLabel(value(point))}"`)
-    .join(", ");
+  const values = points.map((point) => mermaidCoordinate(value(point))).join(", ");
   return `    line [${values}]`;
+}
+
+function renderMeasuredPoints(benchmark, value, unit, options = {}) {
+  const marker = options.marker || "🔵";
+  const labels = benchmark.points.map((point) => {
+    const threadLabel = `${point.threads} thread${point.threads === 1 ? "" : "s"}`;
+    return `${options.label ? "" : `${marker} `}\`${threadLabel}: `
+      + `${numberLabel(value(point))} ${unit}\``;
+  });
+  const heading = options.label ? `**${marker} ${options.label}:**` : "**Measured points:**";
+  return `${heading} ${labels.join(" · ")}`;
 }
 
 function mermaidChartHeader() {
@@ -372,6 +381,8 @@ function renderMermaidTimeChart(benchmark) {
     `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
     mermaidLine(benchmark.points, (point) => point.median),
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median, "s"),
   ].join("\n");
 }
 
@@ -391,6 +402,8 @@ function renderMermaidRateChart(benchmark) {
     `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
     mermaidLine(benchmark.points, (point) => point.median_rate),
     "```",
+    "",
+    renderMeasuredPoints(benchmark, (point) => point.median_rate, `${unit}/s`),
   ].join("\n");
 }
 
@@ -461,6 +474,16 @@ function renderMermaidComparisonChart(benchmarks, valueName) {
     `    y-axis "${unit}" 0 --> ${yMaximum}`,
     ...benchmarks.map((benchmark) => mermaidLine(benchmark.points, value)),
     "```",
+    "",
+    ...benchmarks.map((benchmark, index) => renderMeasuredPoints(
+      benchmark,
+      value,
+      isRate ? `${benchmark.workload_unit}/s` : "s",
+      {
+        label: benchmark.comparison_label || benchmark.name,
+        marker: markers[index % markers.length],
+      },
+    )),
   ].join("\n");
 }
 
