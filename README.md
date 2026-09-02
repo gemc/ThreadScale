@@ -132,6 +132,10 @@ The command prints `summary.md` to the terminal and creates the same CSV, JSON, 
 SVG artifacts as report mode. Raw partial JSON files are retained in a sibling directory ending in `.parts`.
 The output and partial directories must not already exist.
 
+For a shared comparison chart, pass `--benchmarks FILE` and give two or more definitions the same
+`comparison_group`. Their optional `comparison_label` values identify the series. Compared benchmarks must
+use identical thread counts and, for a rate chart, positive workloads with the same unit.
+
 ## Distributed modes
 
 GitHub does not allow a step-level Action to add workflow jobs after a job starts. ThreadScale therefore
@@ -213,10 +217,10 @@ The rate plot is generated only when `workload` is greater than zero. All SVG pl
 or included in project documentation. They mark every measured point with an outlined dot and print its y-value
 next to the marker.
 
-The GitHub Job Summary renders a Mermaid time-vs-threads chart and rate-vs-threads chart after each benchmark
-table. Mermaid's `xychart` lines do not support point labels, so each summary chart is followed by a
-measured-point key containing a dot, thread count, and y-value. The table above the charts contains the complete
-statistics for each point.
+The GitHub Job Summary renders Mermaid time-vs-threads and rate-vs-threads charts after each benchmark table.
+Every line point has a colored bullet and y-value at its measured coordinate. Benchmarks with the same explicit
+`comparison_group` share one chart; `comparison_label` identifies each series in the compact color legend.
+The table above the charts contains the complete statistics for each point.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
@@ -277,7 +281,7 @@ The root Action has three modes so custom workflows can use the same implementat
   applies the optional efficiency threshold.
 
 Discover mode accepts a JSON `benchmarks` array. Every object requires `name` and `command`; optional fields are
-`working_directory`, `workload`, and `workload_unit`.
+`working_directory`, `workload`, `workload_unit`, `comparison_group`, and `comparison_label`.
 
 ## Benchmarking guidance
 
@@ -307,9 +311,9 @@ also use that stable major tag.
 
 ## Contributing
 
-ThreadScale is free and open. Contributions are welcome, and we are happy to
-develop it together — a pull request is the way to go. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, local
-checks, and the pull-request checklist.
+ThreadScale is free and open. Contributions are welcome, and we are happy to develop it together — a pull
+request is the way to go. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, local checks, and the pull-request
+checklist.
 
 For questions or direct contact, open an issue or email **ungaro@jlab.org** 
 ([Maurizio Ungaro](https://github.com/maureeungaro/maureeungaro)).

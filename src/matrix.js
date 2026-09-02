@@ -70,13 +70,18 @@ function parseBenchmarks(json) {
     if (!benchmark.name || !benchmark.command) {
       throw new Error(`benchmark ${index + 1} requires name and command fields`);
     }
-    return {
+    const definition = {
       name: String(benchmark.name),
       command: String(benchmark.command),
       working_directory: String(benchmark.working_directory || "."),
       workload: Number(benchmark.workload || 0),
       workload_unit: String(benchmark.workload_unit || "items"),
     };
+    if (benchmark.comparison_group) {
+      definition.comparison_group = String(benchmark.comparison_group);
+      definition.comparison_label = String(benchmark.comparison_label || benchmark.name);
+    }
+    return definition;
   });
 }
 
@@ -89,6 +94,8 @@ function buildMatrix({ benchmarks, threads, strategy, replicas }) {
     const base = {
       benchmark: benchmark.name,
       command: benchmark.command,
+      comparison_group: benchmark.comparison_group || "",
+      comparison_label: benchmark.comparison_label || benchmark.name,
       working_directory: benchmark.working_directory,
       workload: benchmark.workload,
       workload_unit: benchmark.workload_unit,

@@ -4,7 +4,8 @@ on:
   workflow_call:
     inputs:
       benchmarks:
-        description: JSON array containing name, command, working_directory, workload, and workload_unit.
+        description: >-
+          JSON array containing benchmark commands and optional comparison_group and comparison_label fields.
         required: true
         type: string
       strategy:
@@ -119,6 +120,8 @@ jobs:
         with:
           benchmark-name: ${{ matrix.benchmark }}
           command: ${{ matrix.command }}
+          comparison-group: ${{ matrix.comparison_group }}
+          comparison-label: ${{ matrix.comparison_label }}
           working-directory: ${{ matrix.working_directory }}
           threads: ${{ matrix.threads }}
           replica: ${{ matrix.replica }}

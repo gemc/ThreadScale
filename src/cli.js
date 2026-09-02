@@ -193,6 +193,8 @@ async function runLocal(options) {
     await benchmark({
       benchmarkName: entry.benchmark,
       command: entry.command,
+      comparisonGroup: entry.comparison_group,
+      comparisonLabel: entry.comparison_label,
       minimumDurationSeconds: options.durationSeconds,
       outputDirectory: partialDirectory,
       replica: entry.replica,

@@ -14,6 +14,12 @@ inputs:
   command:
     description: Command template. Use {threads}, {workload}, {run}, {replica}, and {benchmark} placeholders.
     required: false
+  comparison-group:
+    description: Optional group name for benchmarks whose series should share summary charts.
+    required: false
+  comparison-label:
+    description: Optional series label within a comparison chart; defaults to the benchmark name.
+    required: false
   threads:
     description: auto, powers-of-two, a comma-separated list, or an inclusive range such as 1-8.
     required: false

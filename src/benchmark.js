@@ -45,6 +45,8 @@ async function benchmark(options) {
   const {
     benchmarkName,
     command,
+    comparisonGroup = "",
+    comparisonLabel = benchmarkName,
     outputDirectory,
     minimumDurationSeconds = 0,
     replica,
@@ -118,6 +120,8 @@ async function benchmark(options) {
     kind: "thread-scale-partial",
     benchmark: benchmarkName,
     command,
+    comparison_group: comparisonGroup,
+    comparison_label: comparisonLabel,
     created_at: new Date().toISOString(),
     measurements,
     replica,

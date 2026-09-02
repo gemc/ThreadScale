@@ -73,6 +73,8 @@ async function runBenchmark() {
   const result = await benchmark({
     benchmarkName: getInput("benchmark-name", "benchmark"),
     command: getInput("command"),
+    comparisonGroup: getInput("comparison-group"),
+    comparisonLabel: getInput("comparison-label", getInput("benchmark-name", "benchmark")),
     outputDirectory: getInput("output-dir", "thread-scaling"),
     replica: getIntegerInput("replica", 1, 1),
     runnerInfo: cpu,

@@ -90,6 +90,8 @@ function aggregate(partials) {
     if (!grouped.has(partial.benchmark)) {
       grouped.set(partial.benchmark, {
         command: partial.command,
+        comparison_group: String(partial.comparison_group || ""),
+        comparison_label: String(partial.comparison_label || partial.benchmark),
         measurements: new Map(),
         partials: [],
         runners: [],
@@ -145,6 +147,8 @@ function aggregate(partials) {
     benchmarks.push({
       name,
       command: benchmark.command,
+      comparison_group: benchmark.comparison_group,
+      comparison_label: benchmark.comparison_label,
       points,
       replicas: benchmark.partials
         .map((partial) => summarizeReplica(partial, benchmark.workload))
@@ -334,12 +338,11 @@ function mermaidCoordinate(value) {
   return Number(value.toPrecision(8));
 }
 
-function renderMeasuredPoints(benchmark, value, unit) {
-  const labels = benchmark.points.map((point) => {
-    const threadLabel = `${point.threads} thread${point.threads === 1 ? "" : "s"}`;
-    return `🔵 \`${threadLabel}: ${numberLabel(value(point))} ${unit}\``;
-  });
-  return `**Measured points:** ${labels.join(" · ")}`;
+function mermaidLine(points, value) {
+  const values = points
+    .map((point) => `${mermaidCoordinate(value(point))} "● ${numberLabel(value(point))}"`)
+    .join(", ");
+  return `    line [${values}]`;
 }
 
 function mermaidChartHeader() {
@@ -348,7 +351,7 @@ function mermaidChartHeader() {
     "config:",
     "  themeVariables:",
     "    xyChart:",
-    '      plotColorPalette: "#0969da"',
+    '      plotColorPalette: "#0969da, #cf6a00, #1a7f37, #8250df"',
     "---",
     "xychart",
   ];
@@ -357,7 +360,6 @@ function mermaidChartHeader() {
 function renderMermaidTimeChart(benchmark) {
   const title = `${benchmark.name}: time vs threads`.replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const times = benchmark.points.map((point) => mermaidCoordinate(point.median)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
@@ -368,10 +370,8 @@ function renderMermaidTimeChart(benchmark) {
     `    title "${title}"`,
     `    x-axis "Threads" [${threads}]`,
     `    y-axis "Median time (seconds)" 0 --> ${yMaximum}`,
-    `    line [${times}]`,
+    mermaidLine(benchmark.points, (point) => point.median),
     "```",
-    "",
-    renderMeasuredPoints(benchmark, (point) => point.median, "s"),
   ].join("\n");
 }
 
@@ -379,7 +379,6 @@ function renderMermaidRateChart(benchmark) {
   const title = `${benchmark.name}: rate vs threads`.replace(/["\n\r]/g, "'");
   const unit = String(benchmark.workload_unit).replace(/["\n\r]/g, "'");
   const threads = benchmark.points.map((point) => point.threads).join(", ");
-  const rates = benchmark.points.map((point) => mermaidCoordinate(point.median_rate)).join(", ");
   const maximum = Math.max(...benchmark.points.map((point) => point.median_rate), Number.EPSILON);
   const yMaximum = Number((maximum * 1.1).toPrecision(8));
   return [
@@ -390,10 +389,78 @@ function renderMermaidRateChart(benchmark) {
     `    title "${title}"`,
     `    x-axis "Threads" [${threads}]`,
     `    y-axis "${unit} / second" 0 --> ${yMaximum}`,
-    `    line [${rates}]`,
+    mermaidLine(benchmark.points, (point) => point.median_rate),
     "```",
+  ].join("\n");
+}
+
+function comparisonGroups(benchmarks) {
+  const groups = new Map();
+  for (const benchmark of benchmarks) {
+    if (!benchmark.comparison_group) {
+      continue;
+    }
+    if (!groups.has(benchmark.comparison_group)) {
+      groups.set(benchmark.comparison_group, []);
+    }
+    groups.get(benchmark.comparison_group).push(benchmark);
+  }
+  return [...groups].filter(([, members]) => members.length > 1);
+}
+
+function validateComparison(benchmarks, valueName) {
+  const referenceThreads = benchmarks[0].points.map((point) => point.threads).join(",");
+  for (const benchmark of benchmarks.slice(1)) {
+    const threads = benchmark.points.map((point) => point.threads).join(",");
+    if (threads !== referenceThreads) {
+      throw new Error(
+        `comparison group ${benchmark.comparison_group} requires identical thread counts; `
+          + `received ${referenceThreads} and ${threads}`,
+      );
+    }
+  }
+  if (valueName === "rate") {
+    const unit = benchmarks[0].workload_unit;
+    if (benchmarks.some((benchmark) => benchmark.workload <= 0 || benchmark.workload_unit !== unit)) {
+      throw new Error(
+        `comparison group ${benchmarks[0].comparison_group} requires positive workloads with one unit`,
+      );
+    }
+  }
+}
+
+function renderMermaidComparisonChart(benchmarks, valueName) {
+  validateComparison(benchmarks, valueName);
+  const group = String(benchmarks[0].comparison_group).replace(/["\n\r]/g, "'");
+  const isRate = valueName === "rate";
+  const heading = isRate ? "Rate vs threads" : "Time vs threads";
+  const unit = isRate ? `${benchmarks[0].workload_unit} / second` : "Median time (seconds)";
+  const value = isRate ? (point) => point.median_rate : (point) => point.median;
+  const threads = benchmarks[0].points.map((point) => point.threads).join(", ");
+  const maximum = Math.max(
+    ...benchmarks.flatMap((benchmark) => benchmark.points.map((point) => value(point))),
+    Number.EPSILON,
+  );
+  const yMaximum = Number((maximum * 1.1).toPrecision(8));
+  const markers = ["🔵", "🟠", "🟢", "🟣"];
+  const legend = benchmarks.map((benchmark, index) => {
+    const label = benchmark.comparison_label || benchmark.name;
+    return `${markers[index % markers.length]} ${label}`;
+  }).join(" · ");
+  return [
+    `## ${group}`,
     "",
-    renderMeasuredPoints(benchmark, (point) => point.median_rate, `${unit}/s`),
+    `### ${heading}`,
+    "",
+    `**Series:** ${legend}`,
+    "",
+    "```mermaid",
+    ...mermaidChartHeader(),
+    `    title "${group}: ${valueName} vs threads"`,
+    `    x-axis "Threads" [${threads}]`,
+    `    y-axis "${unit}" 0 --> ${yMaximum}`,
+    ...benchmarks.map((benchmark) => mermaidLine(benchmark.points, value)),
+    "```",
   ].join("\n");
 }
 
@@ -407,6 +474,8 @@ function validateSummaryPlots(value) {
 
 function buildMarkdown(benchmarks, summaryPlots = "both") {
   const plotSelection = validateSummaryPlots(summaryPlots);
+  const comparisons = comparisonGroups(benchmarks);
+  const comparedBenchmarks = new Set(comparisons.flatMap(([, members]) => members));
   const lines = ["# Thread Scaling Results", ""];
   for (const benchmark of benchmarks) {
     lines.push(`## ${benchmark.name}`, "");
@@ -485,15 +554,25 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
       }
       lines.push("", "</details>", "");
     }
-    if (plotSelection === "time" || plotSelection === "both") {
+    if (!comparedBenchmarks.has(benchmark)
+        && (plotSelection === "time" || plotSelection === "both")) {
       lines.push(renderMermaidTimeChart(benchmark), "");
     }
-    if (plotSelection === "rate" || plotSelection === "both") {
+    if (!comparedBenchmarks.has(benchmark)
+        && (plotSelection === "rate" || plotSelection === "both")) {
       if (benchmark.workload > 0) {
         lines.push(renderMermaidRateChart(benchmark), "");
       } else {
         lines.push("### Rate vs threads", "", "_Set `workload` above zero to display a rate plot._", "");
       }
+    }
+  }
+  for (const [, members] of comparisons) {
+    if (plotSelection === "time" || plotSelection === "both") {
+      lines.push(renderMermaidComparisonChart(members, "time"), "");
+    }
+    if (plotSelection === "rate" || plotSelection === "both") {
+      lines.push(renderMermaidComparisonChart(members, "rate"), "");
     }
   }
   lines.push(
@@ -609,6 +688,7 @@ module.exports = {
   mean,
   median,
   renderChart,
+  renderMermaidComparisonChart,
   renderMermaidRateChart,
   renderMermaidTimeChart,
   statistics,

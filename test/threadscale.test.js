@@ -15,6 +15,7 @@ const {
   effectiveSerialFraction,
   median,
   renderChart,
+  renderMermaidComparisonChart,
   renderMermaidRateChart,
   renderMermaidTimeChart,
   statistics,
@@ -106,6 +107,13 @@ NUMA node(s):             1
 
 test("benchmark JSON and command placeholders are validated and expanded", () => {
   assert.deepEqual(parseBenchmarks(JSON.stringify(BENCHMARKS)), BENCHMARKS);
+  const compared = parseBenchmarks(JSON.stringify([{
+    ...BENCHMARKS[0],
+    comparison_group: "output comparison",
+    comparison_label: "no output",
+  }]));
+  assert.equal(compared[0].comparison_group, "output comparison");
+  assert.equal(compared[0].comparison_label, "no output");
   assert.throws(() => parseBenchmarks("[]"), /non-empty/);
   assert.equal(
     expandCommand("run -t {threads} -n {workload} -r {run} -p {replica} -b {benchmark}", {
@@ -212,13 +220,11 @@ test("the Markdown summary supports time and rate plots", () => {
   const timeChart = renderMermaidTimeChart(benchmark);
   const rateChart = renderMermaidRateChart(benchmark);
   assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
-  assert.match(timeChart, /line \[2, 1\.2\]/);
-  assert.match(timeChart, /Measured points.*🔵 `1 thread: 2\.00 s`.*🔵 `2 threads: 1\.20 s`/);
-  assert.match(rateChart, /line \[10, 16\.7\]/);
-  assert.match(rateChart, /Measured points.*🔵 `1 thread: 10\.0 events\/s`/);
-  assert.match(rateChart, /plotColorPalette: "#0969da"/);
-  assert.doesNotMatch(timeChart, /line \[[^\]]*"/);
-  assert.doesNotMatch(rateChart, /line \[[^\]]*"/);
+  assert.match(timeChart, /line \[2 "● 2\.00", 1\.2 "● 1\.20"\]/);
+  assert.match(rateChart, /line \[10 "● 10\.0", 16\.7 "● 16\.7"\]/);
+  assert.match(rateChart, /plotColorPalette: "#0969da, #cf6a00/);
+  assert.doesNotMatch(timeChart, /Measured points/);
+  assert.doesNotMatch(rateChart, /Measured points/);
   assert.doesNotMatch(buildMarkdown([benchmark], "none"), /xychart/);
   assert.match(buildMarkdown([benchmark], "time"), /### Time vs threads/);
   assert.doesNotMatch(buildMarkdown([benchmark], "time"), /### Rate vs threads/);
@@ -232,6 +238,32 @@ test("the Markdown summary supports time and rate plots", () => {
   assert.match(buildMarkdown([benchmark], "both"), /Per-replica sweeps \(1\)/);
   assert.match(buildMarkdown([benchmark], "both"), /1 OS physical cores, 2 threads\/core/);
   assert.throws(() => buildMarkdown([benchmark], "invalid"), /summary-plots/);
+
+  const comparisons = [
+    {
+      ...benchmark,
+      comparison_group: "Output comparison",
+      comparison_label: "No output",
+      name: "no-output",
+    },
+    {
+      ...benchmark,
+      comparison_group: "Output comparison",
+      comparison_label: "ROOT output",
+      name: "root-output",
+      points: benchmark.points.map((point) => ({
+        ...point,
+        median_rate: point.median_rate * 0.9,
+      })),
+    },
+  ];
+  const comparisonChart = renderMermaidComparisonChart(comparisons, "rate");
+  assert.match(comparisonChart, /Series:\*\* 🔵 No output · 🟠 ROOT output/);
+  assert.match(comparisonChart, /line \[10 "● 10\.0"/);
+  assert.match(comparisonChart, /line \[9 "● 9\.00"/);
+  const comparisonMarkdown = buildMarkdown(comparisons, "rate");
+  assert.equal((comparisonMarkdown.match(/\`\`\`mermaid/g) || []).length, 1);
+  assert.match(comparisonMarkdown, /## Output comparison/);
 });
 
 test("SVG charts emphasize and label measured points", () => {
@@ -332,6 +364,47 @@ test("local CLI runs a benchmark and writes the standard report", async () => {
     assert.equal(fs.existsSync(path.join(output, "scaling.json")), true);
     assert.match(fs.readFileSync(result.summaryFile, "utf8"), /local-demo/);
     assert.equal(result.report.benchmarks[0].points[0].count >= 2, true);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("local CLI renders grouped benchmark definitions as one comparison chart", async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-comparison-test-"));
+  const benchmarkFile = path.join(temporary, "benchmarks.json");
+  const output = path.join(temporary, "report");
+  const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5)" -- {threads}`;
+  fs.writeFileSync(benchmarkFile, JSON.stringify([
+    {
+      command,
+      comparison_group: "output comparison",
+      comparison_label: "No output",
+      name: "no-output",
+      workload: 10,
+      workload_unit: "events",
+    },
+    {
+      command,
+      comparison_group: "output comparison",
+      comparison_label: "ROOT output",
+      name: "root-output",
+      workload: 10,
+      workload_unit: "events",
+    },
+  ]));
+  try {
+    await runLocal(parseArgs([
+      "--benchmarks", benchmarkFile,
+      "--threads", "1",
+      "--runs", "1",
+      "--warmup-runs", "0",
+      "--summary-plots", "rate",
+      "--output-dir", output,
+    ]));
+    const summary = fs.readFileSync(path.join(output, "summary.md"), "utf8");
+    assert.equal((summary.match(/```mermaid/g) || []).length, 1);
+    assert.match(summary, /Series:\*\* 🔵 No output · 🟠 ROOT output/);
+    assert.equal((summary.match(/    line \[/g) || []).length, 2);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
