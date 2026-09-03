@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { scaledWorkload } = require("./benchmark");
 const { ensureDirectory, slugify, walkJsonFiles } = require("./utils");
 
 function mean(values) {
@@ -35,27 +36,52 @@ function effectiveSerialFraction(speedup, threads) {
   return ((1 / measuredSpeedup) - (1 / threadCount)) / (1 - (1 / threadCount));
 }
 
-function summarizeReplica(partial, workload) {
+function workloadForMeasurement(measurement, workload, coresWorkloadScale) {
+  const recorded = Number(measurement.workload);
+  if (Number.isFinite(recorded) && recorded >= 0) {
+    return recorded;
+  }
+  return scaledWorkload(workload, measurement.threads, coresWorkloadScale);
+}
+
+function summarizeReplica(partial, workload, coresWorkloadScale) {
   const measurements = new Map();
   for (const measurement of partial.measurements) {
     const thread = Number(measurement.threads);
     if (!measurements.has(thread)) {
       measurements.set(thread, []);
     }
-    measurements.get(thread).push(Number(measurement.seconds));
+    measurements.get(thread).push({
+      seconds: Number(measurement.seconds),
+      workload: workloadForMeasurement(measurement, workload, coresWorkloadScale),
+    });
   }
   const points = [...measurements]
     .sort(([left], [right]) => left - right)
-    .map(([threads, values]) => ({ threads, ...statistics(values) }));
+    .map(([threads, values]) => {
+      const workloads = [...new Set(values.map((value) => value.workload))];
+      if (workloads.length !== 1) {
+        throw new Error(`replica ${partial.replica || 1} has inconsistent workloads at ${threads} threads`);
+      }
+      return {
+        threads,
+        workload: workloads[0],
+        ...statistics(values.map((value) => value.seconds)),
+      };
+    });
   const baseline = points.find((point) => point.threads === 1);
   for (const point of points) {
-    if (baseline) {
-      point.speedup = baseline.median / point.median;
-      point.efficiency_percent = (100 * point.speedup) / point.threads;
-      point.effective_serial_fraction = effectiveSerialFraction(point.speedup, point.threads);
+    if (point.workload > 0) {
+      point.median_rate = point.workload / point.median;
     }
-    if (workload > 0) {
-      point.median_rate = workload / point.median;
+    if (baseline) {
+      point.speedup = coresWorkloadScale > 0
+        ? point.median_rate / baseline.median_rate
+        : baseline.median / point.median;
+      point.efficiency_percent = (100 * point.speedup) / point.threads;
+      point.effective_serial_fraction = coresWorkloadScale > 0
+        ? null
+        : effectiveSerialFraction(point.speedup, point.threads);
     }
   }
   return {
@@ -87,19 +113,34 @@ function loadPartials(inputDirectory) {
 function aggregate(partials) {
   const grouped = new Map();
   for (const partial of partials) {
+    const partialScale = Number(partial.cores_workload_scale || 0);
+    const partialWorkload = Number(partial.workload || 0);
+    if (!Number.isFinite(partialScale) || partialScale < 0) {
+      throw new Error(`${partial.benchmark} has an invalid cores-workload-scale value`);
+    }
+    if (partialScale > 0 && (!Number.isFinite(partialWorkload) || partialWorkload <= 0)) {
+      throw new Error(`${partial.benchmark} workload scaling requires a positive base workload`);
+    }
     if (!grouped.has(partial.benchmark)) {
       grouped.set(partial.benchmark, {
         command: partial.command,
         comparison_group: String(partial.comparison_group || ""),
         comparison_label: String(partial.comparison_label || partial.benchmark),
+        cores_workload_scale: partialScale,
         measurements: new Map(),
         partials: [],
         runners: [],
-        workload: Number(partial.workload || 0),
+        workload: partialWorkload,
         workload_unit: partial.workload_unit || "items",
       });
     }
     const benchmark = grouped.get(partial.benchmark);
+    if (partialScale !== benchmark.cores_workload_scale) {
+      throw new Error(`${partial.benchmark} partials use inconsistent cores-workload-scale values`);
+    }
+    if (partialWorkload !== benchmark.workload) {
+      throw new Error(`${partial.benchmark} partials use inconsistent base workloads`);
+    }
     benchmark.partials.push(partial);
     benchmark.runners.push(partial.runner);
     for (const measurement of partial.measurements) {
@@ -107,7 +148,10 @@ function aggregate(partials) {
       if (!benchmark.measurements.has(thread)) {
         benchmark.measurements.set(thread, []);
       }
-      benchmark.measurements.get(thread).push(Number(measurement.seconds));
+      benchmark.measurements.get(thread).push({
+        seconds: Number(measurement.seconds),
+        workload: workloadForMeasurement(measurement, benchmark.workload, benchmark.cores_workload_scale),
+      });
     }
   }
 
@@ -115,7 +159,17 @@ function aggregate(partials) {
   for (const [name, benchmark] of grouped) {
     const points = [...benchmark.measurements]
       .sort(([left], [right]) => left - right)
-      .map(([threads, values]) => ({ threads, ...statistics(values) }));
+      .map(([threads, values]) => {
+        const workloads = [...new Set(values.map((value) => value.workload))];
+        if (workloads.length !== 1) {
+          throw new Error(`${name} has inconsistent workloads at ${threads} threads`);
+        }
+        return {
+          threads,
+          workload: workloads[0],
+          ...statistics(values.map((value) => value.seconds)),
+        };
+      });
     const baseline = points.find((point) => point.threads === 1);
     if (!baseline) {
       throw new Error(`${name} has no one-thread baseline`);
@@ -125,35 +179,64 @@ function aggregate(partials) {
       for (const partial of benchmark.partials) {
         const partialBaseline = partial.measurements
           .filter((measurement) => Number(measurement.threads) === 1)
-          .map((measurement) => Number(measurement.seconds));
+          .map((measurement) => ({
+            seconds: Number(measurement.seconds),
+            workload: workloadForMeasurement(
+              measurement,
+              benchmark.workload,
+              benchmark.cores_workload_scale,
+            ),
+          }));
         const partialPoint = partial.measurements
           .filter((measurement) => Number(measurement.threads) === point.threads)
-          .map((measurement) => Number(measurement.seconds));
+          .map((measurement) => ({
+            seconds: Number(measurement.seconds),
+            workload: workloadForMeasurement(
+              measurement,
+              benchmark.workload,
+              benchmark.cores_workload_scale,
+            ),
+          }));
         if (partialBaseline.length > 0 && partialPoint.length > 0) {
-          pairedSpeedups.push(median(partialBaseline) / median(partialPoint));
+          const timeSpeedup = median(partialBaseline.map((measurement) => measurement.seconds))
+            / median(partialPoint.map((measurement) => measurement.seconds));
+          const workloadRatio = partialPoint[0].workload / partialBaseline[0].workload;
+          pairedSpeedups.push(
+            benchmark.cores_workload_scale > 0 ? workloadRatio * timeSpeedup : timeSpeedup,
+          );
         }
       }
       point.paired_speedup_samples = pairedSpeedups.length;
+      if (point.workload > 0) {
+        point.median_rate = point.workload / point.median;
+        point.mean_rate = point.workload / point.mean;
+      }
       point.speedup = pairedSpeedups.length > 0
         ? median(pairedSpeedups)
-        : baseline.median / point.median;
+        : benchmark.cores_workload_scale > 0
+          ? point.median_rate / baseline.median_rate
+          : baseline.median / point.median;
       point.efficiency_percent = (100 * point.speedup) / point.threads;
-      point.effective_serial_fraction = effectiveSerialFraction(point.speedup, point.threads);
-      if (benchmark.workload > 0) {
-        point.median_rate = benchmark.workload / point.median;
-        point.mean_rate = benchmark.workload / point.mean;
-      }
+      point.effective_serial_fraction = benchmark.cores_workload_scale > 0
+        ? null
+        : effectiveSerialFraction(point.speedup, point.threads);
     }
     benchmarks.push({
       name,
       command: benchmark.command,
       comparison_group: benchmark.comparison_group,
       comparison_label: benchmark.comparison_label,
+      cores_workload_scale: benchmark.cores_workload_scale,
       points,
       replicas: benchmark.partials
-        .map((partial) => summarizeReplica(partial, benchmark.workload))
+        .map((partial) => summarizeReplica(
+          partial,
+          benchmark.workload,
+          benchmark.cores_workload_scale,
+        ))
         .sort((left, right) => left.replica - right.replica),
       runners: benchmark.runners,
+      speedup_basis: benchmark.cores_workload_scale > 0 ? "throughput" : "runtime",
       workload: benchmark.workload,
       workload_unit: benchmark.workload_unit,
     });
@@ -298,6 +381,9 @@ function buildCsv(benchmarks) {
   const rows = [[
     "benchmark",
     "threads",
+    "workload",
+    "cores_workload_scale",
+    "speedup_basis",
     "samples",
     "mean_seconds",
     "median_seconds",
@@ -316,6 +402,9 @@ function buildCsv(benchmarks) {
       rows.push([
         benchmark.name,
         point.threads,
+        point.workload,
+        benchmark.cores_workload_scale,
+        benchmark.cores_workload_scale > 0 ? "throughput" : "runtime",
         point.count,
         point.mean,
         point.median,
@@ -439,6 +528,13 @@ function validateComparison(benchmarks, valueName) {
         `comparison group ${benchmarks[0].comparison_group} requires positive workloads with one unit`,
       );
     }
+    const referenceWorkloads = benchmarks[0].points.map((point) => point.workload).join(",");
+    if (benchmarks.some((benchmark) =>
+      benchmark.points.map((point) => point.workload).join(",") !== referenceWorkloads)) {
+      throw new Error(
+        `comparison group ${benchmarks[0].comparison_group} requires identical workloads`,
+      );
+    }
   }
 }
 
@@ -501,6 +597,7 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
   const comparedBenchmarks = new Set(comparisons.flatMap(([, members]) => members));
   const lines = ["# Thread Scaling Results", ""];
   for (const benchmark of benchmarks) {
+    const throughputScaling = benchmark.cores_workload_scale > 0;
     lines.push(`## ${benchmark.name}`, "");
     const runners = new Map();
     for (const runner of benchmark.runners) {
@@ -512,12 +609,27 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
       lines.push(`- ${count} measurement job${count === 1 ? "" : "s"}: ${description}`);
     }
     lines.push("");
-    if (benchmark.workload > 0) {
+    if (throughputScaling) {
       lines.push(
-        "| Threads | Median time | Std. dev. | Speedup | Efficiency | Effective serial | "
-          + "Median rate | Samples |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        `Workload scaling: \`W(N) = ${benchmark.workload} × `
+          + `[1 + (N - 1) × ${benchmark.cores_workload_scale}]\` ${benchmark.workload_unit}.`,
+        "",
       );
+    }
+    if (benchmark.workload > 0) {
+      if (throughputScaling) {
+        lines.push(
+          "| Threads | Workload | Median time | Std. dev. | Throughput speedup | Efficiency | "
+            + "Median rate | Samples |",
+          "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        );
+      } else {
+        lines.push(
+          "| Threads | Median time | Std. dev. | Speedup | Efficiency | Effective serial | "
+            + "Median rate | Samples |",
+          "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        );
+      }
     } else {
       lines.push(
         "| Threads | Median time | Std. dev. | Speedup | Efficiency | Effective serial | Samples |",
@@ -525,40 +637,60 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
       );
     }
     for (const point of benchmark.points) {
-      const cells = [
-        String(point.threads),
+      const cells = [String(point.threads)];
+      if (throughputScaling) {
+        cells.push(`${point.workload} ${benchmark.workload_unit}`);
+      }
+      cells.push(
         `${point.median.toFixed(3)} s`,
         `${point.standard_deviation.toFixed(3)} s`,
         `${point.speedup.toFixed(2)}x`,
         `${point.efficiency_percent.toFixed(1)}%`,
-        Number.isFinite(point.effective_serial_fraction)
+      );
+      if (!throughputScaling) {
+        cells.push(Number.isFinite(point.effective_serial_fraction)
           ? `${(100 * point.effective_serial_fraction).toFixed(1)}%`
-          : "—",
-      ];
+          : "—");
+      }
       if (benchmark.workload > 0) {
         cells.push(`${point.median_rate.toFixed(2)} ${benchmark.workload_unit}/s`);
       }
       cells.push(String(point.count));
       lines.push(`| ${cells.join(" | ")} |`);
     }
-    lines.push(
-      "",
-      "> **Effective serial fraction:** Lower is better. This Amdahl/Karp–Flatt estimate approximates",
-      "> how much of the application's execution behaves serially. It also includes parallel overhead and",
-      "> contention, so it is not a literal percentage of source code.",
-      "> Negative values can result from superlinear scaling or measurement noise.",
-      "",
-    );
+    if (throughputScaling) {
+      lines.push(
+        "",
+        "> **Throughput scaling:** Speedup is `rate(N) / rate(1)` and efficiency is "
+          + "`speedup / N × 100%`.",
+        "> The Karp–Flatt effective serial estimate is omitted because workloads differ by thread count.",
+        "",
+      );
+    } else {
+      lines.push(
+        "",
+        "> **Effective serial fraction:** Lower is better. This Amdahl/Karp–Flatt estimate approximates",
+        "> how much of the application's execution behaves serially. It also includes parallel overhead and",
+        "> contention, so it is not a literal percentage of source code.",
+        "> Negative values can result from superlinear scaling or measurement noise.",
+        "",
+      );
+    }
     const replicaSweeps = benchmark.replicas.filter((replica) =>
       replica.points.length > 1 && replica.points.some((point) => point.threads === 1));
     if (replicaSweeps.length > 0) {
-      lines.push(
-        "<details>",
-        `<summary>Per-replica sweeps (${replicaSweeps.length})</summary>`,
-        "",
-        "| Replica | Runner | Threads | Median time | Speedup | Effective serial | Median rate |",
-        "|---:|:---|---:|---:|---:|---:|---:|",
-      );
+      lines.push("<details>", `<summary>Per-replica sweeps (${replicaSweeps.length})</summary>`, "");
+      if (throughputScaling) {
+        lines.push(
+          "| Replica | Runner | Threads | Workload | Median time | Throughput speedup | Median rate |",
+          "|---:|:---|---:|---:|---:|---:|---:|",
+        );
+      } else {
+        lines.push(
+          "| Replica | Runner | Threads | Median time | Speedup | Effective serial | Median rate |",
+          "|---:|:---|---:|---:|---:|---:|---:|",
+        );
+      }
       for (const replica of replicaSweeps) {
         for (const [index, point] of replica.points.entries()) {
           const rate = benchmark.workload > 0
@@ -567,12 +699,14 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
           const effectiveSerial = Number.isFinite(point.effective_serial_fraction)
             ? `${(100 * point.effective_serial_fraction).toFixed(1)}%`
             : "—";
-          lines.push(
-            `| ${index === 0 ? replica.replica : ""} | `
-              + `${index === 0 ? runnerDescription(replica.runner) : ""} | ${point.threads} | `
-              + `${point.median.toFixed(3)} s | ${point.speedup.toFixed(2)}x | `
-              + `${effectiveSerial} | ${rate} |`,
-          );
+          const prefix = `| ${index === 0 ? replica.replica : ""} | `
+            + `${index === 0 ? runnerDescription(replica.runner) : ""} | ${point.threads} | `;
+          const row = throughputScaling
+            ? `${point.workload} ${benchmark.workload_unit} | ${point.median.toFixed(3)} s | `
+              + `${point.speedup.toFixed(2)}x | ${rate} |`
+            : `${point.median.toFixed(3)} s | ${point.speedup.toFixed(2)}x | `
+              + `${effectiveSerial} | ${rate} |`;
+          lines.push(prefix + row);
         }
       }
       lines.push("", "</details>", "");
@@ -608,9 +742,13 @@ function buildMarkdown(benchmarks, summaryPlots = "both") {
 function writeCharts(benchmark, outputDirectory) {
   const directory = path.join(outputDirectory, slugify(benchmark.name));
   ensureDirectory(directory);
+  const throughputScaling = benchmark.cores_workload_scale > 0;
   const timePoints = benchmark.points.map((point) => ({ x: point.threads, y: point.median }));
-  const baseline = benchmark.points.find((point) => point.threads === 1).median;
-  const idealTime = benchmark.points.map((point) => ({ x: point.threads, y: baseline / point.threads }));
+  const baseline = benchmark.points.find((point) => point.threads === 1);
+  const idealTime = benchmark.points.map((point) => ({
+    x: point.threads,
+    y: (baseline.median * (throughputScaling ? point.workload / baseline.workload : 1)) / point.threads,
+  }));
   fs.writeFileSync(path.join(directory, "time-vs-threads.svg"), renderChart({
     ideal: idealTime,
     points: timePoints,
@@ -620,17 +758,20 @@ function writeCharts(benchmark, outputDirectory) {
   fs.writeFileSync(path.join(directory, "speedup-vs-threads.svg"), renderChart({
     ideal: benchmark.points.map((point) => ({ x: point.threads, y: point.threads })),
     points: benchmark.points.map((point) => ({ x: point.threads, y: point.speedup })),
-    title: `${benchmark.name}: speedup`,
-    yLabel: "Speedup",
+    title: `${benchmark.name}: ${throughputScaling ? "throughput " : ""}speedup`,
+    yLabel: throughputScaling ? "Throughput speedup" : "Speedup",
   }));
   fs.writeFileSync(path.join(directory, "efficiency-vs-threads.svg"), renderChart({
     ideal: benchmark.points.map((point) => ({ x: point.threads, y: 100 })),
     points: benchmark.points.map((point) => ({ x: point.threads, y: point.efficiency_percent })),
-    title: `${benchmark.name}: parallel efficiency`,
-    yLabel: "Efficiency (%)",
+    title: `${benchmark.name}: ${throughputScaling ? "throughput " : "parallel "}efficiency`,
+    yLabel: throughputScaling ? "Throughput efficiency (%)" : "Efficiency (%)",
   }));
   if (benchmark.workload > 0) {
     fs.writeFileSync(path.join(directory, "rate-vs-threads.svg"), renderChart({
+      ideal: throughputScaling
+        ? benchmark.points.map((point) => ({ x: point.threads, y: baseline.median_rate * point.threads }))
+        : undefined,
       points: benchmark.points.map((point) => ({ x: point.threads, y: point.median_rate })),
       title: `${benchmark.name}: throughput scaling`,
       yLabel: `${benchmark.workload_unit} / second`,
@@ -643,9 +784,13 @@ function writeCharts(benchmark, outputDirectory) {
     const replicaDirectory = path.join(directory, "replicas", `replica-${replica.replica}`);
     ensureDirectory(replicaDirectory);
     const titlePrefix = `${benchmark.name}, replica ${replica.replica}`;
-    const replicaBaseline = replica.points.find((point) => point.threads === 1).median;
+    const replicaBaseline = replica.points.find((point) => point.threads === 1);
     fs.writeFileSync(path.join(replicaDirectory, "time-vs-threads.svg"), renderChart({
-      ideal: replica.points.map((point) => ({ x: point.threads, y: replicaBaseline / point.threads })),
+      ideal: replica.points.map((point) => ({
+        x: point.threads,
+        y: (replicaBaseline.median
+          * (throughputScaling ? point.workload / replicaBaseline.workload : 1)) / point.threads,
+      })),
       points: replica.points.map((point) => ({ x: point.threads, y: point.median })),
       title: `${titlePrefix}: runtime scaling`,
       yLabel: "Median time (seconds)",
@@ -653,11 +798,17 @@ function writeCharts(benchmark, outputDirectory) {
     fs.writeFileSync(path.join(replicaDirectory, "speedup-vs-threads.svg"), renderChart({
       ideal: replica.points.map((point) => ({ x: point.threads, y: point.threads })),
       points: replica.points.map((point) => ({ x: point.threads, y: point.speedup })),
-      title: `${titlePrefix}: speedup`,
-      yLabel: "Speedup",
+      title: `${titlePrefix}: ${throughputScaling ? "throughput " : ""}speedup`,
+      yLabel: throughputScaling ? "Throughput speedup" : "Speedup",
     }));
     if (benchmark.workload > 0) {
       fs.writeFileSync(path.join(replicaDirectory, "rate-vs-threads.svg"), renderChart({
+        ideal: throughputScaling
+          ? replica.points.map((point) => ({
+            x: point.threads,
+            y: replicaBaseline.median_rate * point.threads,
+          }))
+          : undefined,
         points: replica.points.map((point) => ({ x: point.threads, y: point.median_rate })),
         title: `${titlePrefix}: throughput scaling`,
         yLabel: `${benchmark.workload_unit} / second`,

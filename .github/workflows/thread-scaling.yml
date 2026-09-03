@@ -33,6 +33,11 @@ on:
         required: false
         default: 1
         type: number
+      cores-workload-scale:
+        description: Fraction of one-thread work added per additional requested thread; zero keeps work fixed.
+        required: false
+        default: 0
+        type: number
       timeout-seconds:
         description: Timeout for each command invocation.
         required: false
@@ -122,6 +127,7 @@ jobs:
           command: ${{ matrix.command }}
           comparison-group: ${{ matrix.comparison_group }}
           comparison-label: ${{ matrix.comparison_label }}
+          cores-workload-scale: ${{ inputs.cores-workload-scale }}
           working-directory: ${{ matrix.working_directory }}
           threads: ${{ matrix.threads }}
           replica: ${{ matrix.replica }}

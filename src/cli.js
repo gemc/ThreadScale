@@ -30,6 +30,8 @@ Options:
   --timeout-seconds N     timeout for each invocation (default: 300)
   --working-directory DIR command working directory (default: current directory)
   --workload NUMBER       work per invocation; supplies {workload} and enables rate reporting
+  --cores-workload-scale NUMBER
+                          add this fraction of one-thread work per additional thread (default: 0)
   --workload-unit UNIT    rate unit such as events or cells (default: items)
   --output-dir DIR        final report directory (default: thread-scaling)
   --summary-plots VALUE   none, time, rate, or both (default: both)
@@ -62,6 +64,7 @@ function parseArgs(argv) {
     benchmarkFile: "",
     benchmarkName: "benchmark",
     command: "",
+    coresWorkloadScale: 0,
     durationSeconds: 0,
     help: false,
     maxThreads: 0,
@@ -80,6 +83,7 @@ function parseArgs(argv) {
   };
   const names = new Map([
     ["--benchmarks", "benchmarkFile"],
+    ["--cores-workload-scale", "coresWorkloadScale"],
     ["--duration", "durationSeconds"],
     ["--duration-seconds", "durationSeconds"],
     ["--fan-out", "strategy"],
@@ -111,6 +115,11 @@ function parseArgs(argv) {
       options.command = argv.slice(index + 1).map(shellQuote).join(" ");
       break;
     }
+    const scaleAssignment = argument.match(/^--cores-workload-scale=(.+)$/);
+    if (scaleAssignment) {
+      options.coresWorkloadScale = scaleAssignment[1];
+      continue;
+    }
     const key = names.get(argument);
     if (!key) {
       if (!argument.startsWith("-") && !options.command) {
@@ -126,6 +135,11 @@ function parseArgs(argv) {
     options[key] = argv[index];
   }
   options.durationSeconds = numberOption("--duration", options.durationSeconds, 0);
+  options.coresWorkloadScale = numberOption(
+    "--cores-workload-scale",
+    options.coresWorkloadScale,
+    0,
+  );
   options.maxThreads = integerOption("--max-threads", options.maxThreads, 0);
   options.replicas = integerOption("--replicas", options.replicas, 1);
   options.runs = integerOption("--runs", options.runs, 1);
@@ -195,6 +209,7 @@ async function runLocal(options) {
       command: entry.command,
       comparisonGroup: entry.comparison_group,
       comparisonLabel: entry.comparison_label,
+      coresWorkloadScale: options.coresWorkloadScale,
       minimumDurationSeconds: options.durationSeconds,
       outputDirectory: partialDirectory,
       replica: entry.replica,

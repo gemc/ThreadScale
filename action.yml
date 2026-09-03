@@ -55,6 +55,10 @@ inputs:
     description: Work per invocation; supplies {workload} and enables the rate plot when greater than zero.
     required: false
     default: "0"
+  cores-workload-scale:
+    description: Fraction of one-thread work added for each additional requested thread; zero keeps work fixed.
+    required: false
+    default: "0"
   workload-unit:
     description: Workload unit used in rates, for example events or images.
     required: false

@@ -4,7 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { expandCommand } = require("../src/benchmark");
+const { benchmark, expandCommand, scaledWorkload } = require("../src/benchmark");
 const { parseArgs, runLocal } = require("../src/cli");
 const { parseLscpu } = require("../src/cpu");
 const { buildMatrix, parseBenchmarks, parseThreadSpec } = require("../src/matrix");
@@ -44,12 +44,18 @@ test("local CLI options are validated", () => {
     "--max-threads", "64",
     "--strategy", "replicated-sweep",
     "--replicas", "2",
+    "--cores-workload-scale", "0.5",
     "gemc -nthreads={threads}",
   ]);
   assert.equal(options.command, "gemc -nthreads={threads}");
   assert.equal(options.threads, "powers-of-two");
   assert.equal(options.maxThreads, 64);
   assert.equal(options.replicas, 2);
+  assert.equal(options.coresWorkloadScale, 0.5);
+  assert.equal(
+    parseArgs(["gemc {threads} {workload}", "--cores-workload-scale=1"]).coresWorkloadScale,
+    1,
+  );
   assert.throws(() => parseArgs([]), /provide a benchmark command/);
   assert.throws(
     () => parseArgs(["gemc {threads}", "--replicas", "2"]),
@@ -57,6 +63,10 @@ test("local CLI options are validated", () => {
   );
   assert.match(parseArgs(["--", "gemc", "-nthreads={threads}"]).command, /gemc.*nthreads/);
   assert.equal(parseArgs(["gemc {threads}", "--fan-out", "thread-sharded"]).strategy, "thread-sharded");
+  assert.throws(
+    () => parseArgs(["gemc {threads}", "--cores-workload-scale", "-0.1"]),
+    /greater than or equal to 0/,
+  );
 });
 
 test("all three matrix strategies have stable shapes", () => {
@@ -124,6 +134,56 @@ test("benchmark JSON and command placeholders are validated and expanded", () =>
       workload: 100,
     }),
     "run -t 4 -n 100 -r 3 -p 2 -b demo",
+  );
+  assert.equal(scaledWorkload(20000, 1, 1), 20000);
+  assert.equal(scaledWorkload(20000, 2, 1), 40000);
+  assert.equal(scaledWorkload(20000, 4, 0.5), 50000);
+  assert.throws(() => scaledWorkload(20000, 2, -1), /non-negative/);
+});
+
+test("scaled workloads report throughput speedup instead of runtime speedup", () => {
+  const benchmarks = aggregate([{
+    benchmark: "throughput-demo",
+    command: "demo --threads {threads} --items {workload}",
+    cores_workload_scale: 0.5,
+    measurements: [
+      { run: 1, seconds: 10, threads: 1, workload: 100 },
+      { run: 1, seconds: 10, threads: 2, workload: 150 },
+      { run: 1, seconds: 10, threads: 4, workload: 250 },
+    ],
+    runner: { visible_cpus: 4 },
+    workload: 100,
+    workload_unit: "events",
+  }]);
+  const benchmark = benchmarks[0];
+  assert.deepEqual(benchmark.points.map((point) => point.workload), [100, 150, 250]);
+  assert.deepEqual(benchmark.points.map((point) => point.median_rate), [10, 15, 25]);
+  assert.deepEqual(benchmark.points.map((point) => point.speedup), [1, 1.5, 2.5]);
+  assert.deepEqual(benchmark.points.map((point) => point.efficiency_percent), [100, 75, 62.5]);
+  assert.deepEqual(benchmark.points.map((point) => point.effective_serial_fraction), [null, null, null]);
+
+  const summary = buildMarkdown(benchmarks, "rate");
+  assert.match(summary, /W\(N\) = 100 × \[1 \+ \(N - 1\) × 0\.5\]/);
+  assert.match(summary, /Throughput speedup/);
+  assert.match(summary, /250 events/);
+  assert.match(summary, /Karp–Flatt effective serial estimate is omitted/);
+  assert.doesNotMatch(summary, /Effective serial fraction:/);
+});
+
+test("scaled workloads must be connected to the command template", async () => {
+  await assert.rejects(
+    benchmark({
+      benchmarkName: "missing-placeholder",
+      command: "demo --threads {threads}",
+      coresWorkloadScale: 1,
+      outputDirectory: os.tmpdir(),
+      replica: 1,
+      runnerInfo: {},
+      runs: 1,
+      threads: [1],
+      workload: 100,
+    }),
+    /command to contain \{workload\}/,
   );
 });
 
@@ -345,19 +405,22 @@ test("report mode writes portable artifacts and plots", () => {
 test("local CLI runs a benchmark and writes the standard report", async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "threadscale-local-test-"));
   const output = path.join(temporary, "report");
-  const checkWorkload = "if (!process.argv.includes('10')) process.exit(2); setTimeout(() => {}, 5)";
+  const checkWorkload = "const [thread, workload] = process.argv.slice(-2); "
+    + "if ((thread === '1' && workload !== '10') || (thread === '2' && workload !== '15')) process.exit(2); "
+    + "setTimeout(() => {}, 5)";
   try {
     const options = parseArgs([
       `${JSON.stringify(process.execPath)} -e ${JSON.stringify(checkWorkload)} -- {threads} {workload}`,
       "--name", "local-demo",
-      "--threads", "1",
-      "--max-threads", "1",
+      "--threads", "1,2",
+      "--max-threads", "2",
       "--duration", "0.1",
       "--runs", "1",
       "--warmup-runs", "0",
       "--timeout-seconds", "30",
       "--working-directory", temporary,
       "--workload", "10",
+      "--cores-workload-scale", "0.5",
       "--output-dir", output,
       "--summary-plots", "none",
     ]);
@@ -366,6 +429,8 @@ test("local CLI runs a benchmark and writes the standard report", async () => {
     assert.equal(fs.existsSync(path.join(output, "scaling.json")), true);
     assert.match(fs.readFileSync(result.summaryFile, "utf8"), /local-demo/);
     assert.equal(result.report.benchmarks[0].points[0].count >= 2, true);
+    assert.equal(result.report.benchmarks[0].points[0].workload, 10);
+    assert.equal(result.report.benchmarks[0].points[1].workload, 15);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

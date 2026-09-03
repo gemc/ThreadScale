@@ -4,10 +4,10 @@
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-ThreadScale-2088FF?logo=githubactions&logoColor=white)][marketplace]
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-ThreadScale is a language-independent GitHub Action for measuring application strong scaling. It runs the same
-command at several thread counts and reports runtime, throughput, speedup, and parallel efficiency. It also
-ships a reusable workflow that discovers the runner's CPUs, fans measurements out to dynamic matrix jobs,
-transfers partial results through artifacts, and produces the final report.
+ThreadScale is a language-independent GitHub Action for measuring application thread scaling. It supports
+fixed-work strong scaling and workload-scaled throughput measurements, reporting runtime, throughput, speedup,
+and parallel efficiency. It also ships a reusable workflow that discovers the runner's CPUs, fans measurements
+out to dynamic matrix jobs, transfers partial results through artifacts, and produces the final report.
 
 ThreadScale can be used in two ways:
 
@@ -62,6 +62,44 @@ The command template also accepts `{workload}`, `{run}`, `{replica}`, and `{benc
 `{workload}` value comes from the `workload` input; the other placeholders are useful for giving every
 invocation a distinct output filename.
 
+To increase the workload with the requested thread count, set `cores-workload-scale` to a positive number:
+
+```yaml
+- uses: gemc/ThreadScale@v1
+  with:
+    command: ./myprogram --threads {threads} --items {workload}
+    threads: powers-of-two
+    workload: 20000
+    workload-unit: events
+    cores-workload-scale: 1
+    summary-plots: rate
+```
+
+For requested thread count `N`, ThreadScale substitutes this workload:
+
+```text
+W(N) = W(1) × [1 + (N - 1) × cores-workload-scale]
+```
+
+The default scale of `0` keeps the workload fixed. A scale of `1` gives `20,000`, `40,000`, and `80,000`
+events at one, two, and four threads. A scale of `0.5` gives `20,000`, `30,000`, and `50,000` events. Here,
+“core” follows the requested `{threads}` value; the option does not change CPU affinity or select physical
+cores. A positive scale requires a positive base `workload` and a `{workload}` placeholder in the command.
+
+To choose a scale that aims for similar runtimes at one and `N` threads, first make a fixed-work run and
+measure its throughput speedup `S-rate(N) = R(N) / R(1)`. Equal runtime requires the workload ratio to
+approximately match that speedup, so:
+
+```text
+cores-workload-scale ≈ [S-rate(N) - 1] / (N - 1)
+```
+
+For example, a measured throughput speedup of `6.65` at 64 threads gives `(6.65 - 1) / 63 = 0.0897`.
+Rounding the scale to `0.1` changes a 20,000-event base workload to
+`20,000 × [1 + 63 × 0.1] = 146,000` events at 64 threads. At a measured rate of 6,109 events/s, that run takes
+about 23.9 seconds, close to a 21.8-second one-thread run. This is an estimate: rerun and adjust the scale if
+the changed workload moves the application into a different performance regime.
+
 ## Local command-line runs
 
 Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrary command containing the
@@ -79,7 +117,9 @@ cd ThreadScale
   --runs 3 \
   --warmup-runs 1 \
   --workload 50000 \
+  --cores-workload-scale 1 \
   --workload-unit events \
+  --summary-plots rate \
   --output-dir thread-scaling
 ```
 
@@ -88,16 +128,20 @@ interface. ThreadScale replaces `{threads}` before every invocation. For the GEM
 commands include:
 
 ```text
-threads=1  -> gemc example.yaml -n=50000 -nthreads=1  -gstreamer=[]
-threads=2  -> gemc example.yaml -n=50000 -nthreads=2  -gstreamer=[]
-threads=4  -> gemc example.yaml -n=50000 -nthreads=4  -gstreamer=[]
+threads=1  -> gemc example.yaml -n=50000  -nthreads=1  -gstreamer=[]
+threads=2  -> gemc example.yaml -n=100000 -nthreads=2  -gstreamer=[]
+threads=4  -> gemc example.yaml -n=200000 -nthreads=4  -gstreamer=[]
 ...
-threads=64 -> gemc example.yaml -n=50000 -nthreads=64 -gstreamer=[]
+threads=64 -> gemc example.yaml -n=3200000 -nthreads=64 -gstreamer=[]
 ```
 
 Using `{workload}` in the command keeps the executed amount of work synchronized with the value used to
-calculate rates. In this example, `--workload 50000` supplies `-n=50000` and reports the resulting rate in
-events per second.
+calculate rates. In this example, `--workload 50000` is the one-thread workload and the scale of `1` adds that
+much work for every additional requested thread. ThreadScale records the actual workload at every point and
+uses it to report events per second. Use `--cores-workload-scale 0`, or omit the option, for a fixed workload.
+
+The calculated workload may be fractional. Programs that require an integer count should use a base workload
+and scale whose products are integers for every selected thread count.
 
 For another application, put `{threads}` in whatever argument that application uses, such as
 `./solver --workers={threads}` or `python simulation.py --processes {threads}`. ThreadScale cannot infer that
@@ -167,6 +211,7 @@ jobs:
       threads: auto
       runs: 5
       warmup-runs: 1
+      cores-workload-scale: 1
       setup-command: cmake -S . -B build && cmake --build build --parallel
       benchmarks: >-
         [
@@ -208,9 +253,9 @@ The report artifact contains these dependency-free SVG plots for each benchmark:
 
 | Plot | Measured value | Reference line |
 |---|---|---|
-| `time-vs-threads.svg` | Median wall-clock time at each thread count | Ideal runtime, `T(1) / N` |
-| `rate-vs-threads.svg` | `workload / median time` | None |
-| `speedup-vs-threads.svg` | `T(1) / T(N)`, or paired speedup for replicated sweeps | Ideal speedup, `N` |
+| `time-vs-threads.svg` | Median wall-clock time at each thread count | Ideal fixed-work or scaled-work time |
+| `rate-vs-threads.svg` | Point workload divided by median time | Ideal linear rate for scaled work |
+| `speedup-vs-threads.svg` | Runtime or throughput speedup | Ideal speedup, `N` |
 | `efficiency-vs-threads.svg` | `speedup / N × 100%` | Ideal efficiency, `100%` |
 
 The rate plot is generated only when `workload` is greater than zero. All SVG plots remain sharp when downloaded
@@ -237,7 +282,8 @@ Threads   Median time   Speedup   Efficiency   Effective serial   Median rate   
       8        3.280 s     5.62x        70.2%               6.1%     304.88/s        20
 ```
 
-Speedup, efficiency, and effective serial fraction use the median one-thread runtime:
+With the default fixed workload, speedup, efficiency, and effective serial fraction use the median one-thread
+runtime:
 
 ```text
 S(N) = T(1) / T(N)
@@ -249,6 +295,18 @@ Lower effective serial fractions are better. The value approximates how much of 
 behaves serially, but it also includes parallel overhead, contention, and measurement effects; it is not a
 literal percentage of source code. The fraction is undefined at one thread, and superlinear scaling can produce
 a negative estimate.
+
+With a positive `cores-workload-scale`, the summary includes each point's workload and uses throughput speedup:
+
+```text
+R(N) = W(N) / T(N)
+S-throughput(N) = R(N) / R(1)
+E-throughput(N) = S-throughput(N) / N × 100%
+```
+
+The effective serial fraction is omitted in this mode because the Amdahl/Karp–Flatt estimate assumes the same
+work at every thread count. The rate SVG includes an ideal `R(1) × N` reference line. CSV and JSON output store
+the base workload, actual point workloads, scale, and whether speedup is based on runtime or throughput.
 
 The aggregate table includes runtime standard deviation. An expandable per-replica table and the SVG files
 under `replicas/` preserve each runner's curve so heterogeneous hosted machines are not hidden by pooled
@@ -291,9 +349,16 @@ regressions, and locating obvious saturation. They are shared virtual machines a
 benchmark nodes. Prefer replicated sweeps, medians, and a generous regression threshold. Use a stable,
 self-hosted runner with pinned CPU frequency and no competing load for publication-quality measurements.
 
-Keep the workload large enough that process startup and setup are a small fraction of runtime. Run identical
-work at every thread count, avoid unrelated I/O where possible, and use warmup runs for applications with caches
-or just-in-time compilation.
+Keep the workload large enough that process startup and setup are a small fraction of runtime. For strong
+scaling, run identical work at every thread count. For throughput-focused tests, a positive
+`cores-workload-scale` can keep high-thread measurements long enough to be stable. Avoid unrelated I/O where
+possible, and use warmup runs for applications with caches or just-in-time compilation.
+
+Workload scaling changes the question being measured: the points no longer show how quickly the same job
+finishes. Larger jobs can amortize startup costs, use different cache or memory regimes, increase I/O and
+memory pressure, or expose different load balance. A scale of `1` also makes the largest job `N` times larger,
+which can make a wide sweep expensive. Keep the scale, base workload, affinity, and machine topology fixed when
+comparing runs. Interpret the result as throughput scaling, not strong scaling.
 
 ## Development and releases
 

@@ -8,6 +8,22 @@ function expandCommand(template, values) {
   return template.replace(/\{(threads|workload|run|replica|benchmark)\}/g, (_, key) => String(values[key]));
 }
 
+function scaledWorkload(workload, threads, coresWorkloadScale = 0) {
+  const base = Number(workload);
+  const threadCount = Number(threads);
+  const scale = Number(coresWorkloadScale);
+  if (!Number.isFinite(base) || base < 0) {
+    throw new Error(`workload must be a non-negative number; received ${workload}`);
+  }
+  if (!Number.isInteger(threadCount) || threadCount < 1) {
+    throw new Error(`threads must be a positive integer; received ${threads}`);
+  }
+  if (!Number.isFinite(scale) || scale < 0) {
+    throw new Error(`cores-workload-scale must be a non-negative number; received ${coresWorkloadScale}`);
+  }
+  return Number((base * (1 + ((threadCount - 1) * scale))).toPrecision(15));
+}
+
 function runCommand(command, { cwd, env, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     const started = process.hrtime.bigint();
@@ -47,6 +63,7 @@ async function benchmark(options) {
     command,
     comparisonGroup = "",
     comparisonLabel = benchmarkName,
+    coresWorkloadScale = 0,
     outputDirectory,
     minimumDurationSeconds = 0,
     replica,
@@ -63,16 +80,23 @@ async function benchmark(options) {
   if (!command.includes("{threads}") && !threadEnvironment) {
     throw new Error("command must contain {threads}, or thread-env must name an environment variable");
   }
+  if (Number(coresWorkloadScale) > 0 && Number(workload) <= 0) {
+    throw new Error("cores-workload-scale requires a positive workload");
+  }
+  if (Number(coresWorkloadScale) > 0 && !command.includes("{workload}")) {
+    throw new Error("cores-workload-scale requires the command to contain {workload}");
+  }
 
   const measurements = [];
   for (const thread of threads) {
+    const activeWorkload = scaledWorkload(workload, thread, coresWorkloadScale);
     for (let warmupRun = 1; warmupRun <= warmupRuns; warmupRun += 1) {
       const expanded = expandCommand(command, {
         benchmark: benchmarkName,
         replica,
         run: 0,
         threads: thread,
-        workload,
+        workload: activeWorkload,
       });
       const environment = { ...process.env };
       if (threadEnvironment) {
@@ -95,7 +119,7 @@ async function benchmark(options) {
         replica,
         run: measuredRun,
         threads: thread,
-        workload,
+        workload: activeWorkload,
       });
       const environment = { ...process.env };
       if (threadEnvironment) {
@@ -109,7 +133,7 @@ async function benchmark(options) {
         timeoutSeconds,
       });
       console.log(`completed in ${seconds.toFixed(6)} s`);
-      measurements.push({ run: measuredRun, seconds, threads: thread });
+      measurements.push({ run: measuredRun, seconds, threads: thread, workload: activeWorkload });
       measuredDuration += seconds;
       measuredRun += 1;
     }
@@ -122,6 +146,7 @@ async function benchmark(options) {
     command,
     comparison_group: comparisonGroup,
     comparison_label: comparisonLabel,
+    cores_workload_scale: Number(coresWorkloadScale),
     created_at: new Date().toISOString(),
     measurements,
     replica,
@@ -139,4 +164,4 @@ async function benchmark(options) {
   return { filename, result };
 }
 
-module.exports = { benchmark, expandCommand, runCommand };
+module.exports = { benchmark, expandCommand, runCommand, scaledWorkload };

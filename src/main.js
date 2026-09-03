@@ -75,6 +75,7 @@ async function runBenchmark() {
     command: getInput("command"),
     comparisonGroup: getInput("comparison-group"),
     comparisonLabel: getInput("comparison-label", getInput("benchmark-name", "benchmark")),
+    coresWorkloadScale: getNumberInput("cores-workload-scale", 0),
     outputDirectory: getInput("output-dir", "thread-scaling"),
     replica: getIntegerInput("replica", 1, 1),
     runnerInfo: cpu,
@@ -89,9 +90,15 @@ async function runBenchmark() {
   });
   setOutput("result-file", result.filename);
   setOutput("results-dir", path.resolve(getInput("output-dir", "thread-scaling")));
-  const rows = ["| Threads | Run | Time |", "|---:|---:|---:|"];
+  const scaled = result.result.cores_workload_scale > 0;
+  const rows = scaled
+    ? ["| Threads | Workload | Run | Time |", "|---:|---:|---:|---:|"]
+    : ["| Threads | Run | Time |", "|---:|---:|---:|"];
   for (const measurement of result.result.measurements) {
-    rows.push(`| ${measurement.threads} | ${measurement.run} | ${measurement.seconds.toFixed(3)} s |`);
+    rows.push(scaled
+      ? `| ${measurement.threads} | ${measurement.workload} | ${measurement.run} | `
+        + `${measurement.seconds.toFixed(3)} s |`
+      : `| ${measurement.threads} | ${measurement.run} | ${measurement.seconds.toFixed(3)} s |`);
   }
   appendSummary(`## ThreadScale: ${result.result.benchmark}\n\n${rows.join("\n")}\n`);
 }
