@@ -428,7 +428,7 @@ function mermaidCoordinate(value) {
 }
 
 function mermaidLine(points, value) {
-  const values = points.map((point) => mermaidCoordinate(value(point))).join(", ");
+  const values = points.map((point) => `${mermaidCoordinate(value(point))} "●"`).join(", ");
   return `    line [${values}]`;
 }
 
@@ -447,6 +447,9 @@ function mermaidChartHeader() {
   return [
     "---",
     "config:",
+    // Mermaid places line labels 10 pixels above their coordinates; center the dots on the line.
+    "  themeCSS: |",
+    "    .plot .labels { transform: translateY(10px); }",
     "  themeVariables:",
     "    xyChart:",
     '      plotColorPalette: "#0969da, #cf6a00, #1a7f37, #8250df"',

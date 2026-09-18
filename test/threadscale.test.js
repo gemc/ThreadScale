@@ -280,8 +280,9 @@ test("the Markdown summary supports time and rate plots", () => {
   const timeChart = renderMermaidTimeChart(benchmark);
   const rateChart = renderMermaidRateChart(benchmark);
   assert.match(timeChart, /x-axis "Threads" \[1, 2\]/);
-  assert.match(timeChart, /line \[2, 1\.2\]/);
-  assert.match(rateChart, /line \[10, 16\.7\]/);
+  assert.match(timeChart, /line \[2 "●", 1\.2 "●"\]/);
+  assert.match(rateChart, /line \[10 "●", 16\.7 "●"\]/);
+  assert.match(timeChart, /\.plot \.labels \{ transform: translateY\(10px\); \}/);
   assert.match(rateChart, /plotColorPalette: "#0969da, #cf6a00/);
   assert.match(timeChart, /Measured points.*🔵 `1 thread: 2\.00 s`/);
   assert.match(rateChart, /Measured points.*🔵 `1 thread: 10\.0 events\/s`/);
@@ -319,13 +320,23 @@ test("the Markdown summary supports time and rate plots", () => {
   ];
   const comparisonChart = renderMermaidComparisonChart(comparisons, "rate");
   assert.match(comparisonChart, /Series:\*\* 🔵 No output · 🟠 ROOT output/);
-  assert.match(comparisonChart, /line \[10, 16\.7\]/);
-  assert.match(comparisonChart, /line \[9, 15\.03\]/);
+  assert.match(comparisonChart, /line \[10 "●", 16\.7 "●"\]/);
+  assert.match(comparisonChart, /line \[9 "●", 15\.03 "●"\]/);
   assert.match(comparisonChart, /🔵 No output.*1 thread: 10\.0 events\/s/);
   assert.match(comparisonChart, /🟠 ROOT output.*1 thread: 9\.00 events\/s/);
   const comparisonMarkdown = buildMarkdown(comparisons, "rate");
   assert.equal((comparisonMarkdown.match(/\`\`\`mermaid/g) || []).length, 1);
   assert.match(comparisonMarkdown, /## Output comparison/);
+});
+
+test("summary charts mark a single measured point even without a line segment", () => {
+  const benchmark = {
+    name: "single-point",
+    workload_unit: "events",
+    points: [{ threads: 1, median: 2, median_rate: 10 }],
+  };
+  assert.match(renderMermaidTimeChart(benchmark), /line \[2 "●"\]/);
+  assert.match(renderMermaidRateChart(benchmark), /line \[10 "●"\]/);
 });
 
 test("SVG charts emphasize and label measured points", () => {

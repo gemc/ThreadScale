@@ -263,10 +263,10 @@ or included in project documentation. They mark every measured point with an out
 next to the marker.
 
 The GitHub Job Summary renders Mermaid time-vs-threads and rate-vs-threads charts after each benchmark table.
-GitHub's embedded Mermaid version does not yet accept inline labels on line points, so a measured-value key
-follows each chart. Benchmarks with the same explicit `comparison_group` share one chart; `comparison_label`
-identifies each series in the compact color legend and its matching value row. The table above the charts
-contains the complete statistics for each point.
+**Upcoming in the next release:** Each chart marks measured coordinates with dots using Mermaid line-point
+annotations. Numeric values remain in a measured-value key below each chart. Benchmarks with the same explicit
+`comparison_group` share one chart; `comparison_label` identifies each series in the compact color legend and
+its matching value row. The table above the charts contains the complete statistics for each point.
 
 Use `summary-plots` to select `none`, `time`, `rate`, or `both` (the default). Rate charts require a positive
 `workload`; `workload-unit` supplies the rate label. This setting controls only charts embedded in the Job
