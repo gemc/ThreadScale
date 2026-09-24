@@ -4,18 +4,117 @@
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-ThreadScale-2088FF?logo=githubactions&logoColor=white)][marketplace]
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-ThreadScale is a language-independent GitHub Action for measuring application thread scaling. It supports
-fixed-work strong scaling and workload-scaled throughput measurements, reporting runtime, throughput, speedup,
-and parallel efficiency. It also ships a reusable workflow that discovers the runner's CPUs, fans measurements
-out to dynamic matrix jobs, transfers partial results through artifacts, and produces the final report.
+ThreadScale runs your command at several thread counts and reports runtime, speedup, and parallel efficiency.
+Use it to find out whether more threads make your application faster and where scaling levels off. Supply a
+workload size to report throughput too, such as events or images per second.
 
-ThreadScale can be used in two ways:
+Run it locally with `./test_scaling` or in GitHub Actions with `gemc/ThreadScale@v1`. It works with any
+language: your program chooses its thread count through a command-line argument or an environment variable
+such as `OMP_NUM_THREADS`.
 
-- as `gemc/ThreadScale@v1` in GitHub Actions;
-- as the included `./test_scaling` command on a local workstation or compute node.
+## Prerequisites
 
-It works with command-line thread arguments and environment variables such as `OMP_NUM_THREADS`,
-`MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `JULIA_NUM_THREADS`, and `RAYON_NUM_THREADS`.
+- Node.js 24+, Git, and Bash (Linux or macOS; on Windows, use WSL).
+- Your application built and ready to run, with a thread-count argument or environment variable.
+
+ThreadScale itself has no npm dependencies or build step.
+
+## Quickstart: measure your application
+
+Build your software with its usual performance settings and check that your executable runs normally.
+Then clone ThreadScale and pass it your command, using `{threads}` for your program's thread-count argument:
+
+```shell
+git clone https://github.com/gemc/ThreadScale.git
+cd ThreadScale
+
+./test_scaling './myprogram --threads {threads}' \
+  --working-directory /path/to/your/project \
+  --name my-workload --threads powers-of-two --max-threads 8 \
+  --runs 5 --warmup-runs 1 --output-dir my-scaling
+```
+
+Replace `/path/to/your/project` and `./myprogram --threads {threads}` with your application's directory,
+executable, and arguments. The executable and input paths are relative to `--working-directory`. Use the
+thread-count option your program accepts, such as `--workers {threads}` or `-nthreads={threads}`.
+
+This measures powers of two up to eight available CPUs, including the largest available count. Keep the
+amount of work fixed and use a workload long enough that startup time is a small fraction of the total.
+ThreadScale prints a summary and saves results under the checkout in `my-scaling/`:
+
+- `summary.md`: the readable results table.
+- `scaling.csv` and `scaling.json`: measurements for further analysis.
+- `my-workload/time-vs-threads.svg` and `my-workload/speedup-vs-threads.svg`: plots to open in a browser.
+
+Raw measurements are kept in `my-scaling.parts/`. To rerun, choose a new `--output-dir`; both the output
+directory and its `.parts` sibling must not already exist.
+
+If your program uses an environment variable instead of an argument, use this form:
+
+```shell
+./test_scaling './myprogram' --thread-env OMP_NUM_THREADS \
+  --working-directory /path/to/your/project \
+  --threads powers-of-two --max-threads 8 --output-dir omp-scaling
+```
+
+For each selected count `N`, that runs the equivalent of `OMP_NUM_THREADS=N ./myprogram`. Other examples are
+`MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `JULIA_NUM_THREADS`, and `RAYON_NUM_THREADS`. Your program must honor
+the argument or variable; ThreadScale cannot infer its threading interface or make a serial program parallel.
+
+Read **Speedup** as the one-thread time divided by the measured time: `2x` means twice as fast.
+**Efficiency** is speedup divided by thread count: `50%` at four threads means a `2x` speedup. Start with the
+time and speedup plots to see where adding threads stops helping.
+
+## Quickstart: try it in GitHub Actions
+
+Save this as `.github/workflows/scaling.yml` in your repository. This example builds a CMake application;
+replace the build commands and `command` with those for your software. Your runner needs your application's
+build tools and runtime dependencies. The report step creates the final tables and plots:
+
+```yaml
+name: Scaling
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scaling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build your application
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+      - name: Measure
+        uses: gemc/ThreadScale@v1
+        with:
+          command: './build/myprogram --threads {threads}'
+          benchmark-name: my-workload
+          threads: powers-of-two
+          max-threads: '4'
+          runs: '5'
+          warmup-runs: '1'
+          output-dir: scaling-parts
+      - name: Report
+        uses: gemc/ThreadScale@v1
+        with:
+          mode: report
+          input-dir: scaling-parts
+          output-dir: scaling-report
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scaling-report
+          path: scaling-report/
+```
+
+Once the workflow is on your default branch, open **Actions → Scaling → Run workflow**. Read the tables and
+charts in the run summary; download the **scaling-report** artifact for Markdown, CSV, JSON, and SVG files.
+Prepare any input files your application needs before **Measure**. For an environment-variable interface,
+add `thread-env: OMP_NUM_THREADS` instead of using `{threads}` in the command. The Action supplies its own
+Node.js runtime.
 
 <p align="center">
   <img src="example.png" alt="ThreadScale Job Summary showing runner configurations, a thread-scaling table, and a
@@ -26,17 +125,7 @@ rate-vs-threads chart" width="760">
 rendered inline in GitHub Actions, with no externally hosted images.</em>
 </p>
 
-## Quick start: one-job sweep
-
-```yaml
-- name: Measure thread scaling
-  uses: gemc/ThreadScale@v1
-  with:
-    command: ./myprogram --threads {threads}
-    threads: auto
-    runs: 5
-    warmup-runs: 1
-```
+## Choose thread counts and workload
 
 `threads: auto` measures every visible count from `1` through `N`. To reduce the number of points, use
 `threads: powers-of-two`; the largest visible count is always included. Explicit lists and ranges preserve the
@@ -48,15 +137,10 @@ threads: 1,2,4,8
 threads: 1-8
 ```
 
-For OpenMP or another environment-variable interface:
-
-```yaml
-- uses: gemc/ThreadScale@v1
-  with:
-    command: ./myprogram
-    thread-env: OMP_NUM_THREADS
-    threads: powers-of-two
-```
+The local equivalents are `--threads auto`, `--threads powers-of-two`, and `--threads 1,2,4,8`.
+Automatic lists respect the CPUs available to the process; `--max-threads` (Action: `max-threads`) caps them.
+Explicit lists must fit within that limit. ThreadScale requests a thread count but does not pin threads to
+physical cores. The report records CPU topology, affinity, and quota information to help interpret results.
 
 The command template also accepts `{workload}`, `{run}`, `{replica}`, and `{benchmark}` placeholders. The
 `{workload}` value comes from the `workload` input; the other placeholders are useful for giving every
@@ -100,57 +184,24 @@ Rounding the scale to `0.1` changes a 20,000-event base workload to
 about 23.9 seconds, close to a 21.8-second one-thread run. This is an estimate: rerun and adjust the scale if
 the changed workload moves the application into a different performance regime.
 
-## Local command-line runs
+## More local options
 
-Clone ThreadScale on any machine with Node.js 24 or newer, then pass an arbitrary command containing the
-`{threads}` placeholder:
+Use `./test_scaling --help` for the full option list. For example, a GEMC workload can report events per second:
 
 ```shell
-git clone https://github.com/gemc/ThreadScale.git
-cd ThreadScale
-
 ./test_scaling 'gemc example.yaml -n={workload} -nthreads={threads} -gstreamer=[]' \
-  --name scintillator-barrel \
-  --threads powers-of-two \
-  --max-threads 64 \
-  --duration 60 \
-  --runs 3 \
-  --warmup-runs 1 \
-  --workload 50000 \
-  --cores-workload-scale 1 \
-  --workload-unit events \
-  --summary-plots rate \
-  --output-dir thread-scaling
+  --working-directory /path/to/your/example --name scintillator-barrel \
+  --threads powers-of-two --max-threads 8 --runs 3 --warmup-runs 1 \
+  --workload 50000 --workload-unit events --summary-plots rate --output-dir gemc-scaling
 ```
 
-The command is a template, and it must connect ThreadScale's selected count to the program's own threading
-interface. ThreadScale replaces `{threads}` before every invocation. For the GEMC example above, the measured
-commands include:
+This keeps the workload fixed at 50,000 events. Add `--cores-workload-scale 1` to increase it in proportion
+to the thread count, as explained above. The calculated workload may be fractional; programs requiring an
+integer count need a base workload and scale that produce integers at every selected count.
 
-```text
-threads=1  -> gemc example.yaml -n=50000  -nthreads=1  -gstreamer=[]
-threads=2  -> gemc example.yaml -n=100000 -nthreads=2  -gstreamer=[]
-threads=4  -> gemc example.yaml -n=200000 -nthreads=4  -gstreamer=[]
-...
-threads=64 -> gemc example.yaml -n=3200000 -nthreads=64 -gstreamer=[]
-```
-
-Using `{workload}` in the command keeps the executed amount of work synchronized with the value used to
-calculate rates. In this example, `--workload 50000` is the one-thread workload and the scale of `1` adds that
-much work for every additional requested thread. ThreadScale records the actual workload at every point and
-uses it to report events per second. Use `--cores-workload-scale 0`, or omit the option, for a fixed workload.
-
-The calculated workload may be fractional. Programs that require an integer count should use a base workload
-and scale whose products are integers for every selected thread count.
-
-For another application, put `{threads}` in whatever argument that application uses, such as
-`./solver --workers={threads}` or `python simulation.py --processes {threads}`. ThreadScale cannot infer that
-program-specific argument: a direct command must contain `{threads}` unless `--thread-env` is supplied.
-
-This tests `1,2,4,8,16,32,64` when 64 CPUs are visible. Use `--threads auto` to test every integer from one
-through the detected or configured maximum. `--duration` is the minimum cumulative measured time for each
-thread count, while `--runs` is the minimum sample count; measurement continues until both requirements are
-satisfied.
+Add `--duration 60` to measure for at least 60 cumulative seconds **per thread count**. `--runs` is also a
+minimum: measurement continues until both requirements are satisfied. Leave `--duration` unset for a quick
+first run. Options may precede a command after `--` when shell quoting is inconvenient.
 
 The local strategies use the same matrix and aggregation logic as the Action:
 
@@ -160,21 +211,8 @@ The local strategies use the same matrix and aggregation logic as the Action:
 
 `--fan-out` is accepted as an alias for `--strategy`.
 
-Local measurements always execute sequentially so competing benchmark commands do not distort each other. For
-programs controlled by an environment variable, omit `{threads}` and use, for example,
-`--thread-env OMP_NUM_THREADS`. Options may precede a command after `--` when shell quoting is inconvenient.
-
-For each selected value `N`, the environment-variable form runs the equivalent of
-`OMP_NUM_THREADS=N ./myprogram`. In both forms, `N` is the number of threads requested from the application.
-The operating system schedules those threads on the CPUs available to the process; ThreadScale does not pin
-threads to particular physical cores. CPU discovery prevents automatic thread lists from exceeding the visible
-logical CPUs, while `--max-threads` can cap the sweep below the detected count. The report records
-physical-core, SMT, affinity, and cgroup information so the distinction remains visible when interpreting the
-results.
-
-The command prints `summary.md` to the terminal and creates the same CSV, JSON, Markdown, Mermaid summary, and
-SVG artifacts as report mode. Raw partial JSON files are retained in a sibling directory ending in `.parts`.
-The output and partial directories must not already exist.
+Local measurements always execute sequentially so competing benchmark commands do not distort each other.
+Each run creates the same CSV, JSON, Markdown, and SVG report files as the Action's report mode.
 
 For a shared comparison chart, pass `--benchmarks FILE` and give two or more definitions the same
 `comparison_group`. Their optional `comparison_label` values identify the series. Compared benchmarks must
